@@ -16,6 +16,7 @@ const UPDATE_API_URL = 'https://api.github.com/repos/GameRisker/CursorEx/release
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_STARTUP_DELAY_MS = 5000;
 const LAST_STARTUP_UPDATE_CHECK_KEY = 'cursorToolWindow.update.lastStartupCheckAt';
+const VCS_PROVIDER_STATE_KEY = 'cursorToolWindow.vcs.provider';
 
 interface ReferenceResultItem {
   uri: string;
@@ -304,6 +305,31 @@ function normalizeVcsProviderMode(value: unknown): VcsProviderMode {
     return value;
   }
   return 'auto';
+}
+
+function getSavedVcsProvider(config: vscode.WorkspaceConfiguration, context?: vscode.ExtensionContext): VcsProviderMode {
+  const inspected = config.inspect<string>('vcs.provider');
+  const hasConfiguredValue = !!inspected && (
+    typeof inspected.globalValue === 'string' ||
+    typeof inspected.workspaceValue === 'string' ||
+    typeof inspected.workspaceFolderValue === 'string'
+  );
+  const configured = normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'));
+  if (hasConfiguredValue || !context) {
+    return configured;
+  }
+  return normalizeVcsProviderMode(context.globalState.get<string>(VCS_PROVIDER_STATE_KEY, configured));
+}
+
+async function saveVcsProvider(
+  config: vscode.WorkspaceConfiguration,
+  context: vscode.ExtensionContext,
+  value: unknown
+): Promise<VcsProviderMode> {
+  const provider = normalizeVcsProviderMode(value);
+  await config.update('vcs.provider', provider, vscode.ConfigurationTarget.Global);
+  await context.globalState.update(VCS_PROVIDER_STATE_KEY, provider);
+  return provider;
 }
 
 function postUpdateStatusToSettings(status: UpdateStatusPayload): void {
@@ -1513,7 +1539,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
   private getConfiguredVcsProvider(): VcsProviderMode {
     const config = vscode.workspace.getConfiguration('cursorToolWindow');
-    return normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'));
+    return getSavedVcsProvider(config, this.context);
   }
 
   private getVcsVisibility(): VcsVisibility {
@@ -3590,6 +3616,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 let sidebarProvider: CursorToolSidebarProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+  context.globalState.setKeysForSync([VCS_PROVIDER_STATE_KEY]);
   const scanner = new TodoScanner(context);
   const commentManager = new CommentManager(context);
   const pinExManager = new PinExManager(context);
@@ -11427,7 +11454,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             mutedColor: config.get('global.mutedColor', '#c5c5c5'),
             bgColor: config.get('global.bgColor', '#1e1e1e'),
             borderColor: config.get('global.borderColor', '#2d2d2d'),
-            vcsProvider: normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'))
+            vcsProvider: getSavedVcsProvider(config, context)
           },
           todo: {
             extensions: config.get('todo.extensions', ['cs', 'csx', 'js', 'jsx', 'ts', 'tsx', 'cpp', 'c', 'h', 'hpp', 'java', 'go']),
@@ -11487,7 +11514,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             mutedColor: config.get('global.mutedColor', '#c5c5c5'),
             bgColor: config.get('global.bgColor', '#1e1e1e'),
             borderColor: config.get('global.borderColor', '#2d2d2d'),
-            vcsProvider: normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'))
+            vcsProvider: getSavedVcsProvider(config, context)
           },
           todo: {
             extensions: profile.todoExtensions,
@@ -11542,6 +11569,13 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
           );
         }, 500);
         break;
+      case 'saveVcsProvider':
+        if (typeof msg.value === 'string') {
+          await saveVcsProvider(config, context, msg.value);
+          sidebarProvider?.refreshGlobalSettings?.();
+          vscode.window.setStatusBarMessage(`Cursor Tools: VCS provider set to ${normalizeVcsProviderMode(msg.value)}.`, 2000);
+        }
+        break;
       case 'saveSettings':
         // 保存设置
         if (msg.global) {
@@ -11564,7 +11598,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             await config.update('global.borderColor', msg.global.borderColor, vscode.ConfigurationTarget.Global);
           }
           if (typeof msg.global.vcsProvider === 'string') {
-            await config.update('vcs.provider', normalizeVcsProviderMode(msg.global.vcsProvider), vscode.ConfigurationTarget.Global);
+            await saveVcsProvider(config, context, msg.global.vcsProvider);
           }
         }
         if (msg.todo) {
@@ -12346,6 +12380,16 @@ function getSettingsWebviewContent(): string {
       setupColorPicker('comment-hoverColor-picker', 'comment-hoverColor');
       setupColorPicker('pinex-activeColor-picker', 'pinex-activeColor');
       setupColorPicker('pinex-hoverColor-picker', 'pinex-hoverColor');
+
+      var vcsProviderSelect = document.getElementById('global-vcsProvider');
+      if (vcsProviderSelect) {
+        vcsProviderSelect.addEventListener('change', function () {
+          vscode.postMessage({
+            type: 'saveVcsProvider',
+            value: vcsProviderSelect.value || 'auto'
+          });
+        });
+      }
 
       // 保存按钮
       document.getElementById('btn-save').addEventListener('click', function() {
