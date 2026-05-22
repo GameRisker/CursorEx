@@ -547,17 +547,13 @@ class GithubReleaseUpdateService {
         latestVersion: update.latestVersion,
         releaseUrl: update.releaseUrl,
         assetName: update.assetName,
-        message: `Installed v${update.latestVersion}. Reload to activate.`,
+        message: `Installed v${update.latestVersion}. Reloading window...`,
         canInstall: false
       });
 
-      const action = await vscode.window.showInformationMessage(
-        `Cursor Tools v${update.latestVersion} installed. Reload window to activate it.`,
-        'Reload Window'
-      );
-      if (action === 'Reload Window') {
-        await vscode.commands.executeCommand('workbench.action.reloadWindow');
-      }
+      void vscode.window.showInformationMessage(`Cursor Tools v${update.latestVersion} installed. Reloading window...`);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      await vscode.commands.executeCommand('workbench.action.reloadWindow');
     } catch (error) {
       this.setStatus({
         state: 'error',
