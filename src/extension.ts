@@ -1443,16 +1443,23 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     };
   }
 
-  private parseSvnStatusLine(line: string, root: string): SvnStatusItem | null {
+  private parseSvnStatusLine(line: string, root: string, externalPrefix = ''): SvnStatusItem | null {
     if (!line || line.length < 2) {
       return null;
     }
     const status = line.charAt(0);
     const propStatus = line.charAt(1);
     const treeStatus = line.charAt(6);
-    const rawPath = line.length > 8 ? line.substring(8).trim() : '';
+    let rawPath = line.length > 8 ? line.substring(8).trim() : '';
     if (!rawPath) {
       return null;
+    }
+    if (externalPrefix && !path.isAbsolute(rawPath)) {
+      const normalizedRaw = rawPath.replace(/\\/g, '/');
+      const normalizedPrefix = externalPrefix.replace(/\\/g, '/');
+      if (normalizedRaw !== normalizedPrefix && !normalizedRaw.startsWith(`${normalizedPrefix}/`)) {
+        rawPath = path.join(externalPrefix, rawPath);
+      }
     }
 
     const fsPath = path.isAbsolute(rawPath)
@@ -1720,11 +1727,21 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       const root = workingCopyRoot || cwd;
 
       const statusText = await this.runSvn(['status'], root).catch(() => '');
-      const items = statusText
-        ? statusText.split(/\r?\n/)
-            .map(line => this.parseSvnStatusLine(line, root))
-            .filter(Boolean) as SvnStatusItem[]
-        : [];
+      const items: SvnStatusItem[] = [];
+      if (statusText) {
+        let externalPrefix = '';
+        for (const line of statusText.split(/\r?\n/)) {
+          const externalMatch = line.match(/^Performing status on external item at ['"](.+)['"]:/);
+          if (externalMatch) {
+            externalPrefix = externalMatch[1].trim();
+            continue;
+          }
+          const item = this.parseSvnStatusLine(line, root, externalPrefix);
+          if (item) {
+            items.push(item);
+          }
+        }
+      }
 
       this.svnSnapshot = {
         available: true,
@@ -6851,6 +6868,47 @@ function getWebviewContent(version: string): string {
       flex-shrink: 0;
       white-space: nowrap;
     }
+    .vcs-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .vcs-tree-dir {
+      margin-bottom: 1px;
+    }
+    .vcs-tree-dir-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      color: var(--panel-text);
+      cursor: pointer;
+      font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.85);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .vcs-tree-dir-row:hover {
+      background: var(--pinex-hover);
+      color: var(--fg);
+    }
+    .vcs-tree-chevron {
+      width: 12px;
+      flex-shrink: 0;
+      color: var(--panel-text-muted);
+      text-align: center;
+      font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.72);
+    }
+    .vcs-tree-folder {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .vcs-tree-children {
+      margin-left: 14px;
+    }
     .p4-panel {
       padding: 6px;
       min-height: 0;
@@ -8857,7 +8915,59 @@ function getWebviewContent(version: string): string {
         changedHeader.textContent = 'Working Copy Changes';
         svnPanelEl.appendChild(changedHeader);
 
-        svnSnapshot.items.forEach(function (item) {
+        if (!window.__svnTreeExpanded) window.__svnTreeExpanded = {};
+
+        function getSvnItemPath(item) {
+          var raw = String((item && (item.path || item.fsPath)) || '').replace(/\\\\/g, '/');
+          raw = raw.replace(/^\\.\\//, '');
+          if (!raw) raw = String((item && item.fsPath) || 'unknown');
+          return raw;
+        }
+
+        function createSvnTree(items) {
+          var root = { name: '', key: '', dirs: {}, files: [], count: 0, item: null };
+          (items || []).forEach(function (item) {
+            var normalized = getSvnItemPath(item);
+            var parts = normalized.split('/').filter(Boolean);
+            if (!parts.length) {
+              parts = [normalized || 'unknown'];
+            }
+            var fileName = parts.pop();
+            var node = root;
+            var prefix = '';
+            parts.forEach(function (part) {
+              prefix = prefix ? prefix + '/' + part : part;
+              if (!node.dirs[part]) {
+                node.dirs[part] = { name: part, key: prefix, dirs: {}, files: [], count: 0, item: null };
+              }
+              node = node.dirs[part];
+              node.count += 1;
+            });
+            root.count += 1;
+            node.files.push({ name: fileName || normalized, item: item });
+          });
+
+          function absorbDirectoryItems(node) {
+            var kept = [];
+            node.files.forEach(function (file) {
+              var dir = node.dirs[file.name];
+              if (dir) {
+                dir.item = file.item;
+              } else {
+                kept.push(file);
+              }
+            });
+            node.files = kept;
+            Object.keys(node.dirs).forEach(function (name) {
+              absorbDirectoryItems(node.dirs[name]);
+            });
+          }
+
+          absorbDirectoryItems(root);
+          return root;
+        }
+
+        function renderSvnLeaf(item, labelText, parent) {
           var row = document.createElement('div');
           row.className = 'pinex-item p4-file-row';
           row.title = item.path || item.fsPath || '';
@@ -8868,17 +8978,16 @@ function getWebviewContent(version: string): string {
           badge.textContent = actionInfo.label;
           badge.title = actionInfo.text;
 
-          var name = document.createElement('span');
-          name.className = 'p4-file-name';
-          var displayName = (item.path || item.fsPath || '').replace(/\\\\/g, '/').split('/').pop();
-          name.textContent = (displayName || item.path || item.fsPath || '') + ' ';
+          var nameSpan = document.createElement('span');
+          nameSpan.className = 'p4-file-name';
+          nameSpan.textContent = (labelText || item.path || item.fsPath || '') + ' ';
 
           var metaSpan = document.createElement('span');
           metaSpan.className = 'p4-file-meta';
           metaSpan.textContent = actionInfo.text;
 
           row.appendChild(badge);
-          row.appendChild(name);
+          row.appendChild(nameSpan);
           row.appendChild(metaSpan);
 
           if (item.fsPath) {
@@ -8888,8 +8997,89 @@ function getWebviewContent(version: string): string {
             });
           }
 
-          svnPanelEl.appendChild(row);
-        });
+          parent.appendChild(row);
+        }
+
+        function renderSvnDir(node, parent) {
+          var key = 'svn:' + node.key;
+          if (typeof window.__svnTreeExpanded[key] !== 'boolean') {
+            window.__svnTreeExpanded[key] = true;
+          }
+          var expanded = !!window.__svnTreeExpanded[key];
+          var dirWrap = document.createElement('div');
+          dirWrap.className = 'vcs-tree-dir';
+
+          var row = document.createElement('div');
+          row.className = 'vcs-tree-dir-row';
+          row.title = node.key || node.name;
+
+          var chevron = document.createElement('span');
+          chevron.className = 'vcs-tree-chevron';
+          chevron.textContent = expanded ? '▼' : '▶';
+          row.appendChild(chevron);
+
+          if (node.item) {
+            var actionInfo = getSvnActionInfo(node.item);
+            var badge = document.createElement('span');
+            badge.className = 'p4-action-badge ' + actionInfo.key;
+            badge.textContent = actionInfo.label;
+            badge.title = actionInfo.text;
+            row.appendChild(badge);
+          }
+
+          var label = document.createElement('span');
+          label.className = 'vcs-tree-folder';
+          label.textContent = node.name || node.key || 'folder';
+          row.appendChild(label);
+
+          var count = document.createElement('span');
+          count.className = 'p4-file-meta';
+          count.textContent = String(collectSvnTreeCount(node));
+          row.appendChild(count);
+
+          row.addEventListener('click', function () {
+            window.__svnTreeExpanded[key] = !window.__svnTreeExpanded[key];
+            renderSvn();
+          });
+          if (node.item && node.item.fsPath) {
+            row.addEventListener('dblclick', function (ev) {
+              ev.stopPropagation();
+              vscode.postMessage({ type: 'openSvnFile', path: node.item.fsPath });
+            });
+          }
+
+          dirWrap.appendChild(row);
+          if (expanded) {
+            var children = document.createElement('div');
+            children.className = 'vcs-tree-children';
+            renderSvnTreeChildren(node, children);
+            dirWrap.appendChild(children);
+          }
+          parent.appendChild(dirWrap);
+        }
+
+        function collectSvnTreeCount(node) {
+          var total = node.files.length + (node.item ? 1 : 0);
+          Object.keys(node.dirs).forEach(function (name) {
+            total += collectSvnTreeCount(node.dirs[name]);
+          });
+          return total;
+        }
+
+        function renderSvnTreeChildren(node, parent) {
+          Object.keys(node.dirs).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (name) {
+            renderSvnDir(node.dirs[name], parent);
+          });
+          node.files.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); }).forEach(function (file) {
+            renderSvnLeaf(file.item, file.name, parent);
+          });
+        }
+
+        var treeRoot = createSvnTree(svnSnapshot.items || []);
+        var treeWrap = document.createElement('div');
+        treeWrap.className = 'vcs-tree';
+        renderSvnTreeChildren(treeRoot, treeWrap);
+        svnPanelEl.appendChild(treeWrap);
       }
 
       function renderReferences() {
@@ -10420,6 +10610,38 @@ function getSvnCommitWorkbenchHtml(): string {
       font-family: var(--vscode-editor-font-family);
       font-size: 12px;
     }
+    .tree-toggle {
+      display: inline-flex;
+      width: 14px;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .tree-path {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .tree-dir-row {
+      color: var(--fg);
+      font-weight: 500;
+    }
+    .tree-dir-name,
+    .tree-file-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tree-count {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+      flex-shrink: 0;
+    }
     .muted { color: var(--muted); }
     .warn { color: var(--warn, var(--danger)); }
     .empty {
@@ -10521,6 +10743,7 @@ function getSvnCommitWorkbenchHtml(): string {
       var busy = false;
       var activePath = '';
       var filter = 'all';
+      var treeExpanded = {};
 
       var statusPill = document.getElementById('status-pill');
       var targetLabel = document.getElementById('target-label');
@@ -10622,6 +10845,86 @@ function getSvnCommitWorkbenchHtml(): string {
         return true;
       }
 
+      function getItemParts(item) {
+        var raw = String((item && (item.path || item.fsPath)) || '').replace(/\\\\/g, '/');
+        raw = raw.replace(/^\\.\\//, '');
+        var parts = raw.split('/').filter(Boolean);
+        if (!parts.length) {
+          parts = [raw || 'unknown'];
+        }
+        return parts;
+      }
+
+      function createFileTree(sourceItems) {
+        var root = { name: '', key: '', dirs: {}, files: [], item: null };
+        (sourceItems || []).forEach(function (item) {
+          var parts = getItemParts(item);
+          var fileName = parts.pop();
+          var node = root;
+          var prefix = '';
+          parts.forEach(function (part) {
+            prefix = prefix ? prefix + '/' + part : part;
+            if (!node.dirs[part]) {
+              node.dirs[part] = { name: part, key: prefix, dirs: {}, files: [], item: null };
+            }
+            node = node.dirs[part];
+          });
+          node.files.push({ name: fileName || item.path || item.fsPath || 'unknown', item: item });
+        });
+
+        function absorbDirectoryItems(node) {
+          var kept = [];
+          node.files.forEach(function (file) {
+            var dir = node.dirs[file.name];
+            if (dir) {
+              dir.item = file.item;
+            } else {
+              kept.push(file);
+            }
+          });
+          node.files = kept;
+          Object.keys(node.dirs).forEach(function (name) {
+            absorbDirectoryItems(node.dirs[name]);
+          });
+        }
+
+        absorbDirectoryItems(root);
+        return root;
+      }
+
+      function collectNodeItems(node) {
+        var collected = [];
+        if (node.item) {
+          collected.push(node.item);
+        }
+        node.files.forEach(function (file) {
+          collected.push(file.item);
+        });
+        Object.keys(node.dirs).forEach(function (name) {
+          collected = collected.concat(collectNodeItems(node.dirs[name]));
+        });
+        return collected;
+      }
+
+      function nodeSelectionState(node) {
+        var committable = collectNodeItems(node).filter(function (item) { return item.canCommit; });
+        var selected = committable.filter(function (item) { return item.selected; });
+        return {
+          total: committable.length,
+          selected: selected.length,
+          checked: committable.length > 0 && selected.length === committable.length,
+          indeterminate: selected.length > 0 && selected.length < committable.length
+        };
+      }
+
+      function setNodeSelected(node, selected) {
+        collectNodeItems(node).forEach(function (item) {
+          if (item.canCommit) {
+            item.selected = selected;
+          }
+        });
+      }
+
       function visibleCount() {
         return items.filter(itemMatchesFilter).length;
       }
@@ -10648,7 +10951,7 @@ function getSvnCommitWorkbenchHtml(): string {
         emptyState.style.display = visible.length ? 'none' : 'block';
         emptyState.textContent = items.length ? 'No files match this filter.' : 'No local SVN changes.';
 
-        visible.forEach(function (item) {
+        function renderFileRow(item, labelText, depth) {
           var row = document.createElement('tr');
           row.className = 'row-' + statusClass(item);
           if (item.fsPath === activePath) {
@@ -10667,8 +10970,7 @@ function getSvnCommitWorkbenchHtml(): string {
           });
           checkbox.addEventListener('change', function () {
             item.selected = checkbox.checked;
-            updateButtons();
-            renderSummary();
+            render();
           });
           checkCell.appendChild(checkbox);
 
@@ -10682,7 +10984,18 @@ function getSvnCommitWorkbenchHtml(): string {
 
           var pathCell = document.createElement('td');
           pathCell.className = 'path-cell';
-          pathCell.textContent = item.path || item.fsPath || '';
+          var pathWrap = document.createElement('span');
+          pathWrap.className = 'tree-path';
+          pathWrap.style.paddingLeft = String(depth * 16) + 'px';
+          var spacer = document.createElement('span');
+          spacer.className = 'tree-toggle';
+          spacer.textContent = '';
+          var fileName = document.createElement('span');
+          fileName.className = 'tree-file-name';
+          fileName.textContent = labelText || item.path || item.fsPath || '';
+          pathWrap.appendChild(spacer);
+          pathWrap.appendChild(fileName);
+          pathCell.appendChild(pathWrap);
 
           var warningCell = document.createElement('td');
           warningCell.className = item.warning ? 'col-warning warn' : 'col-warning muted';
@@ -10703,7 +11016,96 @@ function getSvnCommitWorkbenchHtml(): string {
           });
 
           fileBody.appendChild(row);
-        });
+        }
+
+        function renderDirRow(node, depth) {
+          var key = node.key || node.name;
+          if (typeof treeExpanded[key] !== 'boolean') {
+            treeExpanded[key] = true;
+          }
+          var expanded = !!treeExpanded[key];
+          var nodeItems = collectNodeItems(node);
+          var selection = nodeSelectionState(node);
+
+          var row = document.createElement('tr');
+          row.className = 'tree-dir-row';
+          row.title = key;
+
+          var checkCell = document.createElement('td');
+          checkCell.className = 'col-check';
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = selection.checked;
+          checkbox.indeterminate = selection.indeterminate;
+          checkbox.disabled = busy || !selection.total;
+          checkbox.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+          });
+          checkbox.addEventListener('change', function () {
+            setNodeSelected(node, checkbox.checked);
+            render();
+          });
+          checkCell.appendChild(checkbox);
+
+          var statusCell = document.createElement('td');
+          statusCell.className = 'col-status';
+          if (node.item) {
+            var actionInfo = statusClass(node.item);
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + actionInfo;
+            badge.textContent = node.item.status || '?';
+            badge.title = node.item.statusText || '';
+            statusCell.appendChild(badge);
+          }
+
+          var pathCell = document.createElement('td');
+          pathCell.className = 'path-cell';
+          var pathWrap = document.createElement('span');
+          pathWrap.className = 'tree-path';
+          pathWrap.style.paddingLeft = String(depth * 16) + 'px';
+          var toggle = document.createElement('span');
+          toggle.className = 'tree-toggle';
+          toggle.textContent = expanded ? '▼' : '▶';
+          var folderName = document.createElement('span');
+          folderName.className = 'tree-dir-name';
+          folderName.textContent = node.name || key;
+          var count = document.createElement('span');
+          count.className = 'tree-count';
+          count.textContent = String(nodeItems.length);
+          pathWrap.appendChild(toggle);
+          pathWrap.appendChild(folderName);
+          pathWrap.appendChild(count);
+          pathCell.appendChild(pathWrap);
+
+          var warningCell = document.createElement('td');
+          warningCell.className = node.item && node.item.warning ? 'col-warning warn' : 'col-warning muted';
+          warningCell.textContent = node.item && node.item.warning ? node.item.warning : 'folder';
+
+          row.appendChild(checkCell);
+          row.appendChild(statusCell);
+          row.appendChild(pathCell);
+          row.appendChild(warningCell);
+          row.addEventListener('click', function () {
+            treeExpanded[key] = !treeExpanded[key];
+            render();
+          });
+
+          fileBody.appendChild(row);
+          if (expanded) {
+            renderTreeChildren(node, depth + 1);
+          }
+        }
+
+        function renderTreeChildren(node, depth) {
+          Object.keys(node.dirs).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (name) {
+            renderDirRow(node.dirs[name], depth);
+          });
+          node.files.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); }).forEach(function (file) {
+            renderFileRow(file.item, file.name, depth);
+          });
+        }
+
+        renderTreeChildren(createFileTree(visible), 0);
 
         renderSummary();
         updateButtons();
