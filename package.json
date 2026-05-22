@@ -1,0 +1,530 @@
+{
+  "name": "cursor-tool-window",
+  "displayName": "Cursor Tool Window",
+  "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
+  "version": "0.1.87",
+  "publisher": "danyang",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "*",
+    "onCommand:cursorToolWindow.open",
+    "onView:cursorToolWindow.sidebar"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorToolWindow.open",
+        "title": "Open Cursor Tool Window"
+      },
+      {
+        "command": "cursorToolWindow.openSettings",
+        "title": "Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "cursorToolWindow.addComment",
+        "title": "Toggle Comment",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.pinEx",
+        "title": "Pin Ex",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.unpinEx",
+        "title": "UnPinEx",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.pinExLocate",
+        "title": "Locate (Pinned Window)",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.findReferencesEx",
+        "title": "Find References Ex",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.findImplementationsEx",
+        "title": "Find Implementations Ex",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.quickOpen",
+        "title": "Quick Open",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.quickOpenFiles",
+        "title": "Quick Open Files",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.quickOpenClasses",
+        "title": "Quick Open Classes",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.p4Edit",
+        "title": "P4 Edit",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.p4Revert",
+        "title": "P4 Revert",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.p4DiffDepot",
+        "title": "P4 Diff Against Depot",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.p4FileHistory",
+        "title": "P4 File History",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.openKeyboardShortcuts",
+        "title": "Open Keyboard Shortcuts",
+        "category": "Cursor Tools",
+        "icon": "$(keyboard)"
+      }
+    ],
+    "menus": {
+      "editor/lineNumber/context": [
+        {
+          "command": "cursorToolWindow.addComment",
+          "group": "debug@11"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "cursorToolWindow.findReferencesEx",
+          "group": "navigation@98"
+        },
+        {
+          "command": "cursorToolWindow.findImplementationsEx",
+          "group": "navigation@99"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "cursorToolWindow.pinEx",
+          "when": "!cursorToolWindow.pinExPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "cursorToolWindow.unpinEx",
+          "when": "cursorToolWindow.pinExPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "cursorToolWindow.pinExLocate",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cursorToolWindow.p4Edit",
+          "group": "3_p4@0"
+        },
+        {
+          "command": "cursorToolWindow.p4DiffDepot",
+          "group": "3_p4@1"
+        },
+        {
+          "command": "cursorToolWindow.p4FileHistory",
+          "group": "3_p4@2"
+        },
+        {
+          "command": "cursorToolWindow.p4Revert",
+          "group": "3_p4@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "cursorToolWindow.pinEx",
+          "when": "!cursorToolWindow.pinExPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "cursorToolWindow.unpinEx",
+          "when": "cursorToolWindow.pinExPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "cursorToolWindow.pinExLocate",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cursorToolWindow.p4Edit",
+          "when": "explorerResourceIsFolder == false",
+          "group": "3_p4@0"
+        },
+        {
+          "command": "cursorToolWindow.p4DiffDepot",
+          "when": "explorerResourceIsFolder == false",
+          "group": "3_p4@1"
+        },
+        {
+          "command": "cursorToolWindow.p4FileHistory",
+          "when": "explorerResourceIsFolder == false",
+          "group": "3_p4@2"
+        },
+        {
+          "command": "cursorToolWindow.p4Revert",
+          "when": "explorerResourceIsFolder == false",
+          "group": "3_p4@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "cursorToolWindow.openSettings",
+          "when": "view == cursorToolWindow.sidebar",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "-editor.action.referenceSearch.trigger",
+        "key": "shift+f12",
+        "when": "editorHasReferenceProvider && editorTextFocus"
+      },
+      {
+        "command": "cursorToolWindow.findReferencesEx",
+        "key": "shift+f12",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "-workbench.action.quickOpen",
+        "key": "ctrl+t",
+        "mac": "cmd+t"
+      },
+      {
+        "command": "cursorToolWindow.quickOpen",
+        "key": "ctrl+t",
+        "mac": "cmd+t"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cursorToolWindowContainer",
+          "title": "Cursor Tools",
+          "icon": "resources/cursor-tool.svg"
+        }
+      ]
+    },
+    "views": {
+      "cursorToolWindowContainer": [
+        {
+          "id": "cursorToolWindow.sidebar",
+          "name": "Cursor Tools",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "Cursor Tool Window",
+        "properties": {
+          "cursorToolWindow.global.fontSize": {
+            "type": "number",
+            "default": 13,
+            "minimum": 10,
+            "maximum": 20,
+            "description": "Font size (px) for the Cursor Tool Window."
+          },
+          "cursorToolWindow.global.accentColor": {
+            "type": "string",
+            "default": "#0e639c",
+            "description": "Accent color used for highlights, hover states, etc."
+          },
+          "cursorToolWindow.global.textColor": {
+            "type": "string",
+            "default": "#f3f3f3",
+            "description": "Primary text color."
+          },
+          "cursorToolWindow.global.mutedColor": {
+            "type": "string",
+            "default": "#c5c5c5",
+            "description": "Secondary text color (line numbers, hints, etc.)."
+          },
+          "cursorToolWindow.global.bgColor": {
+            "type": "string",
+            "default": "#1e1e1e",
+            "description": "Background color."
+          },
+          "cursorToolWindow.global.borderColor": {
+            "type": "string",
+            "default": "#2d2d2d",
+            "description": "Border color."
+          },
+          "cursorToolWindow.todo.extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "cs",
+              "csx",
+              "js",
+              "jsx",
+              "ts",
+              "tsx",
+              "cpp",
+              "c",
+              "h",
+              "hpp",
+              "java",
+              "go"
+            ],
+            "description": "File extensions to scan for TODOs, e.g. [\"cs\", \"ts\"]. Empty means scan nothing."
+          },
+          "cursorToolWindow.todo.includeGlobs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Limit scanning scope by glob patterns, e.g. [\"src\", \"Client/**\"]. Empty means the whole workspace."
+          },
+          "cursorToolWindow.todo.excludeGlobs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/node_modules/**",
+              "**/bin/**",
+              "**/obj/**"
+            ],
+            "description": "Glob patterns excluded from TODO scanning."
+          },
+          "cursorToolWindow.todo.contentFilter": {
+            "type": "string",
+            "default": "",
+            "description": "Only show TODO items containing this keyword. Empty shows all."
+          },
+          "cursorToolWindow.todo.hoverColor": {
+            "type": "string",
+            "default": "rgba(14,99,156,0.45)",
+            "description": "Background color on hover for TODO items."
+          },
+          "cursorToolWindow.todo.fontSize": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Font size for the TODO panel (0 uses the global setting)."
+          },
+          "cursorToolWindow.p4.autoCheckoutOnEdit": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically run 'p4 edit' when a local file is first modified in the editor."
+          },
+          "cursorToolWindow.p4.externalDiffToolPath": {
+            "type": "string",
+            "default": "",
+            "description": "Optional external diff tool executable path for P4 depot comparisons, e.g. Beyond Compare."
+          },
+          "cursorToolWindow.p4.externalDiffToolArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "{left}",
+              "{right}"
+            ],
+            "description": "Arguments passed to the external diff tool. Supported placeholders: {left}/{depot} for depot temp file, {right}/{local} for local file."
+          },
+          "cursorToolWindow.comment.fontSize": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Font size for the COMMENT panel (0 uses the global setting)."
+          },
+          "cursorToolWindow.comment.activeColor": {
+            "type": "string",
+            "default": "rgba(14,99,156,0.6)",
+            "description": "Highlight color for the active comment."
+          },
+          "cursorToolWindow.comment.hoverColor": {
+            "type": "string",
+            "default": "rgba(14,99,156,0.45)",
+            "description": "Background color on hover for comment items."
+          },
+          "cursorToolWindow.pinex.activeColor": {
+            "type": "string",
+            "default": "rgba(14,99,156,0.6)",
+            "description": "Highlight color for the active file in PinEx."
+          },
+          "cursorToolWindow.pinex.hoverColor": {
+            "type": "string",
+            "default": "rgba(14,99,156,0.45)",
+            "description": "Background color on hover for PinEx items."
+          },
+          "cursorToolWindow.pinex.fontSize": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Font size for the PinEx panel (0 uses the global setting)."
+          },
+          "cursorToolWindow.pinex.fileExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Only show files with these extensions under PinEx folders. Empty shows all (e.g. cs, ts, js)."
+          },
+          "cursorToolWindow.quickOpen.keybinding": {
+            "type": "string",
+            "default": "ctrl+t",
+            "description": "Keyboard shortcut for Quick Open command. Default is 'ctrl+t' (Mac: 'cmd+t'). To customize, use the command 'Cursor Tools: Open Keyboard Shortcuts' or press Ctrl+K Ctrl+S and search for 'cursorToolWindow.quickOpen'."
+          },
+          "cursorToolWindow.quickOpen.maxItems": {
+            "type": "number",
+            "default": 50,
+            "minimum": 10,
+            "maximum": 200,
+            "description": "Maximum number of items to display in Quick Open window."
+          },
+          "cursorToolWindow.search.mode": {
+            "type": "string",
+            "enum": [
+              "filename",
+              "class",
+              "fileclass",
+              "content",
+              "all"
+            ],
+            "default": "all",
+            "description": "Search mode: 'filename' (file name only), 'class' (types only), 'fileclass' (file names + types), 'content' (file content), 'all' (file names + types + content)."
+          },
+          "cursorToolWindow.search.fileExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "cs",
+              "csx",
+              "js",
+              "jsx",
+              "ts",
+              "tsx",
+              "cpp",
+              "c",
+              "h",
+              "hpp",
+              "java",
+              "go",
+              "py",
+              "rb",
+              "php",
+              "swift",
+              "kt",
+              "rs",
+              "vue",
+              "html",
+              "css",
+              "scss",
+              "less",
+              "json",
+              "xml",
+              "yaml",
+              "yml",
+              "md",
+              "txt"
+            ],
+            "description": "File extensions to search (empty = all files)."
+          },
+          "cursorToolWindow.search.includeDirectories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Only search in these directories (empty = whole workspace). E.g. ['src', 'lib']."
+          },
+          "cursorToolWindow.search.excludeDirectories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/node_modules/**",
+              "**/bin/**",
+              "**/obj/**",
+              "**/.git/**",
+              "**/dist/**",
+              "**/build/**",
+              "**/.vs/**",
+              "**/Library/**",
+              "**/Temp/**"
+            ],
+            "description": "Directories to exclude from search."
+          },
+          "cursorToolWindow.search.caseSensitive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Case-sensitive search."
+          },
+          "cursorToolWindow.search.debounceDelay": {
+            "type": "number",
+            "default": 300,
+            "minimum": 100,
+            "maximum": 1000,
+            "description": "Delay (ms) before starting search after typing stops."
+          },
+          "cursorToolWindow.search.maxFilesToSearch": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 5000,
+            "description": "Maximum number of files to search for content matching. Set to 0 for no limit."
+          },
+          "cursorToolWindow.search.maxContentMatches": {
+            "type": "number",
+            "default": 100,
+            "minimum": 10,
+            "maximum": 500,
+            "description": "Maximum number of content matches to display."
+          },
+          "cursorToolWindow.search.previewLines": {
+            "type": "number",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Number of lines to preview for content matches."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "npm version patch --no-git-tag-version && npx --yes @vscode/vsce package",
+    "lint": "echo \"no lint configured\"",
+    "test": "echo \"no tests\""
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.4.0"
+  }
+}
