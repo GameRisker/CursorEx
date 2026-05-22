@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.90",
+  "version": "0.1.91",
   "publisher": "danyang",
   "repository": {
     "type": "git",
@@ -30,6 +30,7 @@
     "onCommand:cursorToolWindow.svnRevert",
     "onCommand:cursorToolWindow.svnDiffBase",
     "onCommand:cursorToolWindow.svnFileHistory",
+    "onCommand:cursorToolWindow.svnCommitWorkbench",
     "onCommand:cursorToolWindow.svnCommitDirectory",
     "onView:cursorToolWindow.sidebar"
   ],
@@ -157,6 +158,11 @@
         "category": "Cursor Tools"
       },
       {
+        "command": "cursorToolWindow.svnCommitWorkbench",
+        "title": "SVN Commit...",
+        "category": "Cursor Tools"
+      },
+      {
         "command": "cursorToolWindow.svnCommitDirectory",
         "title": "SVN Commit Directory",
         "category": "Cursor Tools"
@@ -264,6 +270,11 @@
           "command": "cursorToolWindow.svnRevert",
           "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@4"
+        },
+        {
+          "command": "cursorToolWindow.svnCommitWorkbench",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@5"
         }
       ],
       "explorer/context": [
@@ -352,8 +363,8 @@
           "group": "4_svn@4"
         },
         {
-          "command": "cursorToolWindow.svnCommitDirectory",
-          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showSvn",
+          "command": "cursorToolWindow.svnCommitWorkbench",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@5"
         }
       ],

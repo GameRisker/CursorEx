@@ -99,6 +99,34 @@ interface SvnSnapshot {
   updatedAt: number;
 }
 
+interface SvnCommitFileItem {
+  id: string;
+  path: string;
+  fsPath: string;
+  status: string;
+  statusText: string;
+  propStatus: string;
+  treeStatus: string;
+  selected: boolean;
+  isUnversioned: boolean;
+  canCommit: boolean;
+  canRevert: boolean;
+  warning: string;
+}
+
+interface SvnCommitWorkbenchSnapshot {
+  targetPath: string;
+  targetLabel: string;
+  workingCopyRoot: string;
+  url: string;
+  revision: string;
+  status: string;
+  items: SvnCommitFileItem[];
+  selectedCount: number;
+  committableCount: number;
+  updatedAt: number;
+}
+
 type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
 type VcsProviderMode = 'auto' | 'p4' | 'svn' | 'both' | 'none';
 type ActiveVcsProvider = 'p4' | 'svn';
@@ -244,6 +272,31 @@ async function httpsGetJson<T>(url: string): Promise<T> {
 function toSafeFileName(name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
   return safe || `cursor-tool-window-${Date.now()}.vsix`;
+}
+
+function decodeXmlAttribute(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function parseXmlAttributes(value: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const attrRegex = /([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*("([^"]*)"|'([^']*)')/g;
+  let match: RegExpExecArray | null;
+  while ((match = attrRegex.exec(value)) !== null) {
+    attrs[match[1]] = decodeXmlAttribute(match[3] ?? match[4] ?? '');
+  }
+  return attrs;
+}
+
+function getCommandOutputFromError(error: unknown): string {
+  const anyError = error as any;
+  const output = anyError && (anyError.stderr || anyError.stdout || anyError.message);
+  return output ? String(output).trim() : getErrorMessage(error);
 }
 
 function normalizeVcsProviderMode(value: unknown): VcsProviderMode {
@@ -1198,6 +1251,198 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return `${result.stdout || ''}${result.stderr || ''}`.trim();
   }
 
+  private async resolveSvnCommitTargetUri(resource?: any): Promise<vscode.Uri | null> {
+    const uri = await this.resolveTargetUri(resource);
+    if (uri) {
+      try {
+        const stat = await fs.stat(uri.fsPath);
+        return stat.isDirectory() ? uri : vscode.Uri.file(path.dirname(uri.fsPath));
+      } catch {
+        return vscode.Uri.file(path.dirname(uri.fsPath));
+      }
+    }
+
+    const editorUri = vscode.window.activeTextEditor?.document?.uri;
+    if (editorUri && editorUri.scheme === 'file') {
+      return vscode.Uri.file(path.dirname(editorUri.fsPath));
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri || null;
+  }
+
+  private async getSvnInfoForTarget(targetPath: string): Promise<{ workingCopyRoot: string; url: string; revision: string }> {
+    const infoText = await this.runSvn(['info', targetPath], path.dirname(targetPath));
+    const workingCopyRoot = (infoText.match(/^Working Copy Root Path:\s*(.+)$/m)?.[1] || '').trim();
+    const url = (infoText.match(/^URL:\s*(.+)$/m)?.[1] || '').trim();
+    const revision = (infoText.match(/^Revision:\s*(.+)$/m)?.[1] || '').trim();
+    return {
+      workingCopyRoot: workingCopyRoot || targetPath,
+      url,
+      revision
+    };
+  }
+
+  private createSvnCommitFileItem(
+    rawPath: string,
+    root: string,
+    itemStatus: string,
+    propStatus: string,
+    treeConflicted: boolean
+  ): SvnCommitFileItem | null {
+    if (!rawPath) {
+      return null;
+    }
+
+    const normalizedItem = (itemStatus || '').trim().toLowerCase();
+    const normalizedProps = (propStatus || 'none').trim().toLowerCase();
+    if (!treeConflicted && normalizedItem === 'normal' && (normalizedProps === 'none' || !normalizedProps)) {
+      return null;
+    }
+
+    const fsPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(root, rawPath);
+    const uri = vscode.Uri.file(fsPath);
+    const relativeToRoot = path.relative(root, fsPath) || path.basename(fsPath);
+    const displayPath = vscode.workspace.asRelativePath(uri, false) || relativeToRoot || rawPath;
+
+    let status = '?';
+    let statusText = normalizedItem || 'changed';
+    let canCommit = false;
+    let canRevert = false;
+    let isUnversioned = false;
+    let warning = '';
+
+    if (treeConflicted || normalizedItem === 'conflicted') {
+      status = 'C';
+      statusText = 'conflict';
+      canRevert = true;
+      warning = 'Resolve conflicts before committing.';
+    } else if (normalizedItem === 'modified') {
+      status = 'M';
+      statusText = 'modified';
+      canCommit = true;
+      canRevert = true;
+    } else if (normalizedItem === 'added') {
+      status = 'A';
+      statusText = 'added';
+      canCommit = true;
+      canRevert = true;
+    } else if (normalizedItem === 'deleted') {
+      status = 'D';
+      statusText = 'deleted';
+      canCommit = true;
+      canRevert = true;
+    } else if (normalizedItem === 'replaced') {
+      status = 'R';
+      statusText = 'replaced';
+      canCommit = true;
+      canRevert = true;
+    } else if (normalizedItem === 'unversioned') {
+      status = '?';
+      statusText = 'unversioned';
+      canCommit = true;
+      isUnversioned = true;
+      warning = 'Select to add before commit.';
+    } else if (normalizedItem === 'missing') {
+      status = '!';
+      statusText = 'missing';
+      canRevert = true;
+      warning = 'Missing files must be restored or scheduled for delete before commit.';
+    } else if (normalizedItem === 'obstructed') {
+      status = '~';
+      statusText = 'obstructed';
+      warning = 'Obstructed items cannot be committed.';
+    } else if (normalizedItem === 'ignored') {
+      status = 'I';
+      statusText = 'ignored';
+      warning = 'Ignored items are not committable.';
+    } else if (normalizedItem === 'external') {
+      status = 'X';
+      statusText = 'external';
+      warning = 'External items are not committed with this working copy.';
+    } else if (normalizedItem === 'normal' && normalizedProps !== 'none') {
+      status = 'P';
+      statusText = `properties ${normalizedProps}`;
+      canCommit = true;
+      canRevert = true;
+    } else {
+      status = (normalizedItem || '?').slice(0, 1).toUpperCase();
+      statusText = normalizedItem || 'changed';
+      warning = 'This SVN status is shown for review only.';
+    }
+
+    if (normalizedProps !== 'none' && normalizedItem !== 'normal') {
+      statusText += `, properties ${normalizedProps}`;
+    }
+
+    return {
+      id: fsPath,
+      path: displayPath,
+      fsPath,
+      status,
+      statusText,
+      propStatus: normalizedProps || 'none',
+      treeStatus: treeConflicted ? 'C' : '',
+      selected: canCommit && !isUnversioned,
+      isUnversioned,
+      canCommit,
+      canRevert,
+      warning
+    };
+  }
+
+  private parseSvnCommitStatusXml(xml: string, root: string): SvnCommitFileItem[] {
+    const items: SvnCommitFileItem[] = [];
+    const entryRegex = /<entry\b([^>]*)>([\s\S]*?)<\/entry>/g;
+    let entryMatch: RegExpExecArray | null;
+    while ((entryMatch = entryRegex.exec(xml)) !== null) {
+      const entryAttrs = parseXmlAttributes(entryMatch[1] || '');
+      const rawPath = entryAttrs.path || '';
+      const wcStatusMatch = entryMatch[2].match(/<wc-status\b([^>]*)\/?>/);
+      if (!wcStatusMatch) {
+        continue;
+      }
+      const wcAttrs = parseXmlAttributes(wcStatusMatch[1] || '');
+      const item = this.createSvnCommitFileItem(
+        rawPath,
+        root,
+        wcAttrs.item || '',
+        wcAttrs.props || 'none',
+        String(wcAttrs['tree-conflicted'] || '').toLowerCase() === 'true'
+      );
+      if (item) {
+        items.push(item);
+      }
+    }
+
+    const order: Record<string, number> = { C: 0, M: 1, P: 2, A: 3, D: 4, R: 5, '?': 6, '!': 7, '~': 8, I: 9, X: 10 };
+    return items.sort((a, b) => {
+      const left = order[a.status] ?? 99;
+      const right = order[b.status] ?? 99;
+      if (left !== right) return left - right;
+      return a.path.localeCompare(b.path);
+    });
+  }
+
+  private async buildSvnCommitSnapshot(targetUri: vscode.Uri): Promise<SvnCommitWorkbenchSnapshot> {
+    const info = await this.getSvnInfoForTarget(targetUri.fsPath);
+    const root = info.workingCopyRoot || targetUri.fsPath;
+    const statusXml = await this.runSvn(['status', '--xml', targetUri.fsPath], root);
+    const items = this.parseSvnCommitStatusXml(statusXml, root);
+    const targetLabel = vscode.workspace.asRelativePath(targetUri, false) || targetUri.fsPath;
+    return {
+      targetPath: targetUri.fsPath,
+      targetLabel,
+      workingCopyRoot: root,
+      url: info.url,
+      revision: info.revision,
+      status: `SVN${info.revision ? ' · r' + info.revision : ''}`,
+      items,
+      selectedCount: items.filter(item => item.selected).length,
+      committableCount: items.filter(item => item.canCommit).length,
+      updatedAt: Date.now()
+    };
+  }
+
   private parseSvnStatusLine(line: string, root: string): SvnStatusItem | null {
     if (!line || line.length < 2) {
       return null;
@@ -1608,19 +1853,257 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
-  async svnCommitDirectory(resource?: any): Promise<void> {
-    const uri = await this.resolveTargetDirectoryUri(resource);
-    if (!uri) {
+  private getSvnCommitItemsByPath(paths: unknown, currentItems: SvnCommitFileItem[]): SvnCommitFileItem[] {
+    if (!Array.isArray(paths)) {
+      return [];
+    }
+    const byPath = new Map(currentItems.map(item => [path.normalize(item.fsPath), item]));
+    const selected: SvnCommitFileItem[] = [];
+    const seen = new Set<string>();
+    for (const rawPath of paths) {
+      if (typeof rawPath !== 'string' || !rawPath) {
+        continue;
+      }
+      const key = path.normalize(rawPath);
+      if (seen.has(key)) {
+        continue;
+      }
+      const item = byPath.get(key);
+      if (item) {
+        selected.push(item);
+        seen.add(key);
+      }
+    }
+    return selected;
+  }
+
+  private async writeSvnTargetsFile(root: string, items: SvnCommitFileItem[]): Promise<string> {
+    const dir = path.join(this.context.globalStorageUri.fsPath, 'svn-targets');
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, `commit-targets-${Date.now()}-${Math.round(Math.random() * 100000)}.txt`);
+    const lines = items.map(item => {
+      const relative = path.relative(root, item.fsPath);
+      return relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+        ? relative
+        : item.fsPath;
+    });
+    await fs.writeFile(filePath, lines.join(os.EOL), 'utf8');
+    return filePath;
+  }
+
+  private async openSvnCommitDiff(item: SvnCommitFileItem, root: string): Promise<boolean> {
+    const status = String(item.status || '').toUpperCase();
+    if (item.isUnversioned || status === 'A') {
+      await this.openSvnLocalFile(item.fsPath);
+      return true;
+    }
+    if (status === 'C') {
+      vscode.window.showWarningMessage('SVN: resolve conflicts before using the commit diff view.');
+      return false;
+    }
+    if (status === '!' || status === 'D') {
+      vscode.window.showWarningMessage('SVN: deleted or missing files cannot be opened in the commit diff view.');
+      return false;
+    }
+
+    try {
+      const baseText = await this.runSvn(['cat', '-r', 'BASE', item.fsPath], root);
+      const diffDir = path.join(this.context.globalStorageUri.fsPath, 'svn-diff');
+      await fs.mkdir(diffDir, { recursive: true });
+      const ext = path.extname(item.fsPath);
+      const stem = path.basename(item.fsPath, ext);
+      const basePath = path.join(diffDir, `${toSafeFileName(stem)}-${Date.now()}.BASE${ext}`);
+      await fs.writeFile(basePath, baseText, 'utf8');
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        vscode.Uri.file(basePath),
+        vscode.Uri.file(item.fsPath),
+        `SVN Diff: ${item.path}`
+      );
+      return true;
+    } catch (error) {
+      vscode.window.showErrorMessage(`SVN diff failed: ${getCommandOutputFromError(error)}`);
+      return false;
+    }
+  }
+
+  async svnCommitWorkbench(resource?: any): Promise<void> {
+    const targetUri = await this.resolveSvnCommitTargetUri(resource);
+    if (!targetUri) {
       vscode.window.showWarningMessage('SVN: no local directory selected.');
       return;
     }
-    const message = await this.promptCommitMessage('SVN', uri);
-    if (!message) {
-      return;
-    }
-    const output = await this.runSvn(['commit', uri.fsPath, '-m', message], this.getSvnWorkingDirectory());
-    await this.refreshSvnSnapshot();
-    vscode.window.showInformationMessage(output || `SVN: committed ${vscode.workspace.asRelativePath(uri, false) || uri.fsPath}.`);
+
+    const targetName = path.basename(targetUri.fsPath) || targetUri.fsPath;
+    const panel = vscode.window.createWebviewPanel(
+      'cursorToolWindow.svnCommitWorkbench',
+      `SVN Commit: ${targetName}`,
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true
+      }
+    );
+
+    let currentSnapshot: SvnCommitWorkbenchSnapshot | null = null;
+    let busy = false;
+
+    const postBusy = (message: string): void => {
+      panel.webview.postMessage({ type: 'busy', message });
+    };
+
+    const postError = (message: string): void => {
+      panel.webview.postMessage({ type: 'operationError', message });
+    };
+
+    const postInfo = (message: string): void => {
+      panel.webview.postMessage({ type: 'operationInfo', message });
+    };
+
+    const refresh = async (): Promise<void> => {
+      postBusy('Refreshing SVN status...');
+      try {
+        currentSnapshot = await this.buildSvnCommitSnapshot(targetUri);
+        panel.webview.postMessage({
+          type: 'snapshot',
+          snapshot: currentSnapshot
+        });
+      } catch (error) {
+        const message = getCommandOutputFromError(error);
+        currentSnapshot = null;
+        postError(message || 'SVN status failed.');
+      }
+    };
+
+    const runOperation = async (label: string, operation: () => Promise<void>): Promise<void> => {
+      if (busy) {
+        return;
+      }
+      busy = true;
+      postBusy(label);
+      try {
+        await operation();
+      } catch (error) {
+        const message = getCommandOutputFromError(error);
+        postError(message || `${label} failed.`);
+        vscode.window.showErrorMessage(`SVN: ${message || `${label} failed.`}`);
+      } finally {
+        busy = false;
+      }
+    };
+
+    panel.webview.onDidReceiveMessage(msg => {
+      if (!msg || typeof msg.type !== 'string') {
+        return;
+      }
+      switch (msg.type) {
+        case 'ready':
+        case 'refresh':
+          void runOperation('Refreshing SVN status...', refresh);
+          break;
+        case 'cancel':
+          panel.dispose();
+          break;
+        case 'diff':
+          void runOperation('Opening diff...', async () => {
+            const items = this.getSvnCommitItemsByPath([msg.path], currentSnapshot?.items || []);
+            const item = items[0];
+            if (!item || !currentSnapshot) {
+              postError('Select a changed file first.');
+              return;
+            }
+            const opened = await this.openSvnCommitDiff(item, currentSnapshot.workingCopyRoot || targetUri.fsPath);
+            if (opened) {
+              postInfo(`Opened diff for ${item.path}.`);
+            }
+          });
+          break;
+        case 'add':
+          void runOperation('Adding files...', async () => {
+            const items = this.getSvnCommitItemsByPath(msg.paths, currentSnapshot?.items || [])
+              .filter(item => item.isUnversioned);
+            if (!items.length) {
+              postError('Select one or more unversioned files to add.');
+              return;
+            }
+            const root = currentSnapshot?.workingCopyRoot || targetUri.fsPath;
+            for (const item of items) {
+              await this.runSvn(['add', '--parents', item.fsPath], root);
+            }
+            postInfo(`Added ${items.length} file(s).`);
+            await refresh();
+            await this.refreshSvnSnapshot();
+          });
+          break;
+        case 'revert':
+          void runOperation('Reverting files...', async () => {
+            const items = this.getSvnCommitItemsByPath(msg.paths, currentSnapshot?.items || [])
+              .filter(item => item.canRevert);
+            if (!items.length) {
+              postError('Select one or more versioned files to revert.');
+              return;
+            }
+            const confirm = await vscode.window.showWarningMessage(
+              `SVN: revert ${items.length} selected file(s)?`,
+              { modal: true },
+              'Revert'
+            );
+            if (confirm !== 'Revert') {
+              postInfo('Revert canceled.');
+              return;
+            }
+            const root = currentSnapshot?.workingCopyRoot || targetUri.fsPath;
+            for (const item of items) {
+              await this.runSvn(['revert', item.fsPath], root);
+            }
+            postInfo(`Reverted ${items.length} file(s).`);
+            await refresh();
+            await this.refreshSvnSnapshot();
+          });
+          break;
+        case 'commit':
+          void runOperation('Committing selected files...', async () => {
+            const message = typeof msg.message === 'string' ? msg.message.trim() : '';
+            if (!message) {
+              postError('Commit message is required.');
+              return;
+            }
+            const selectedItems = this.getSvnCommitItemsByPath(msg.paths, currentSnapshot?.items || [])
+              .filter(item => item.canCommit);
+            if (!selectedItems.length) {
+              postError('Select one or more committable files.');
+              return;
+            }
+
+            const root = currentSnapshot?.workingCopyRoot || targetUri.fsPath;
+            const unversioned = selectedItems.filter(item => item.isUnversioned);
+            for (const item of unversioned) {
+              await this.runSvn(['add', '--parents', item.fsPath], root);
+            }
+
+            const targetsFile = await this.writeSvnTargetsFile(root, selectedItems);
+            try {
+              const output = await this.runSvn(['commit', '--targets', targetsFile, '-m', message], root);
+              postInfo(output || `Committed ${selectedItems.length} file(s).`);
+              vscode.window.showInformationMessage(output || `SVN: committed ${selectedItems.length} file(s).`);
+            } finally {
+              await fs.unlink(targetsFile).catch(() => undefined);
+            }
+
+            await refresh();
+            await this.refreshSvnSnapshot();
+          });
+          break;
+        default:
+          break;
+      }
+    });
+
+    panel.webview.html = getSvnCommitWorkbenchHtml();
+  }
+
+  async svnCommitDirectory(resource?: any): Promise<void> {
+    await this.svnCommitWorkbench(resource);
   }
 
   private async openSvnLocalFile(filePath: string): Promise<void> {
@@ -3405,6 +3888,9 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('cursorToolWindow.svnFileHistory', async (resource?: any) => {
       await provider.svnFileHistory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnCommitWorkbench', async (resource?: any) => {
+      await provider.svnCommitWorkbench(resource);
     }),
     vscode.commands.registerCommand('cursorToolWindow.svnCommitDirectory', async (resource?: any) => {
       await provider.svnCommitDirectory(resource);
@@ -6617,7 +7103,7 @@ function getWebviewContent(version: string): string {
             <div class="pinex-inline-toolbar">
               <button class="pinex-toolbar-icon" id="svn-refresh-btn-inline" title="Refresh SVN">&#8635;</button>
               <button class="pinex-toolbar-icon" id="svn-update-btn-inline" title="Update working copy">Update</button>
-              <button class="pinex-toolbar-icon" id="svn-commit-dir-btn-inline" title="Commit current directory">Commit</button>
+              <button class="pinex-toolbar-icon" id="svn-commit-dir-btn-inline" title="Open SVN Commit window">Commit...</button>
               <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
               <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
               <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
@@ -9705,6 +10191,603 @@ function getWebviewContent(version: string): string {
         }
       }
     }());
+  </script>
+</body>
+</html>`;
+}
+
+function getSvnCommitWorkbenchHtml(): string {
+  const nonce = getNonce();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <title>SVN Commit</title>
+  <style>
+    :root {
+      --bg: var(--vscode-editor-background);
+      --fg: var(--vscode-foreground);
+      --muted: var(--vscode-descriptionForeground);
+      --border: var(--vscode-panel-border);
+      --input: var(--vscode-input-background);
+      --input-border: var(--vscode-input-border);
+      --button: var(--vscode-button-background);
+      --button-fg: var(--vscode-button-foreground);
+      --button-hover: var(--vscode-button-hoverBackground);
+      --row-hover: var(--vscode-list-hoverBackground);
+      --row-active: var(--vscode-list-activeSelectionBackground);
+      --danger: var(--vscode-errorForeground);
+      --warn: var(--vscode-editorWarning-foreground);
+      --ok: var(--vscode-testing-iconPassed);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      line-height: 1.4;
+      overflow: hidden;
+    }
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      min-width: 520px;
+    }
+    header {
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 6px;
+    }
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .status-pill {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .target {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+    }
+    .message-wrap {
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    textarea {
+      width: 100%;
+      min-height: 96px;
+      max-height: 180px;
+      resize: vertical;
+      color: var(--fg);
+      background: var(--input);
+      border: 1px solid var(--input-border, var(--border));
+      border-radius: 3px;
+      padding: 8px;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      outline: none;
+    }
+    textarea:focus { border-color: var(--vscode-focusBorder); }
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+    .toolbar {
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid var(--border);
+      background: var(--vscode-button-secondaryBackground, transparent);
+      color: var(--vscode-button-secondaryForeground, var(--fg));
+      border-radius: 3px;
+      padding: 4px 10px;
+      min-height: 26px;
+      cursor: pointer;
+      font: inherit;
+      white-space: nowrap;
+    }
+    button:hover:not(:disabled) {
+      background: var(--vscode-button-secondaryHoverBackground, var(--row-hover));
+    }
+    button.primary {
+      background: var(--button);
+      color: var(--button-fg);
+      border-color: var(--button);
+    }
+    button.primary:hover:not(:disabled) { background: var(--button-hover); }
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .spacer { flex: 1; min-width: 8px; }
+    .chips {
+      display: inline-flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .chip {
+      padding: 3px 7px;
+      min-height: 24px;
+      font-size: 12px;
+    }
+    .chip.active {
+      border-color: var(--vscode-focusBorder);
+      background: var(--row-active);
+      color: var(--vscode-list-activeSelectionForeground, var(--fg));
+    }
+    .table-wrap {
+      min-height: 0;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--bg);
+    }
+    th, td {
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      padding: 5px 8px;
+      text-align: left;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .col-check { width: 38px; text-align: center; }
+    .col-status { width: 88px; }
+    .col-warning { width: 260px; }
+    tbody tr { cursor: default; }
+    tbody tr:hover { background: var(--row-hover); }
+    tbody tr.active {
+      background: var(--row-active);
+      color: var(--vscode-list-activeSelectionForeground, var(--fg));
+    }
+    input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 20px;
+      padding: 0 5px;
+      border-radius: 3px;
+      font-weight: 700;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      text-transform: uppercase;
+    }
+    .badge.modified, .badge.props { color: #9cdcfe; border-color: rgba(156,220,254,0.45); background: rgba(156,220,254,0.14); }
+    .badge.added, .badge.unversioned { color: #4ec9b0; border-color: rgba(78,201,176,0.45); background: rgba(78,201,176,0.14); }
+    .badge.deleted, .badge.missing, .badge.conflict { color: #f48771; border-color: rgba(244,135,113,0.45); background: rgba(244,135,113,0.14); }
+    .badge.replaced { color: #d7ba7d; border-color: rgba(215,186,125,0.45); background: rgba(215,186,125,0.14); }
+    .path-cell {
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+    }
+    .muted { color: var(--muted); }
+    .warn { color: var(--warn, var(--danger)); }
+    .empty {
+      padding: 28px;
+      text-align: center;
+      color: var(--muted);
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-line {
+      flex: 1;
+      min-width: 0;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .status-line.error { color: var(--danger); }
+    .status-line.ok { color: var(--ok, var(--fg)); }
+    @media (max-width: 720px) {
+      .app { min-width: 0; }
+      .col-warning { display: none; }
+      .toolbar { align-items: stretch; }
+      .chips { width: 100%; }
+      .spacer { display: none; }
+      footer { flex-wrap: wrap; }
+      footer .status-line { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title-row">
+        <h1>SVN Commit</h1>
+        <div class="status-pill" id="status-pill">Loading...</div>
+      </div>
+      <div class="target" id="target-label">Preparing working copy...</div>
+      <div class="target" id="repo-label"></div>
+    </header>
+
+    <section class="message-wrap">
+      <label for="commit-message">Message</label>
+      <textarea id="commit-message" placeholder="Enter commit message"></textarea>
+    </section>
+
+    <main class="main">
+      <div class="toolbar">
+        <button id="btn-refresh" title="Refresh SVN status">Refresh</button>
+        <button id="btn-select-all" title="Select all committable files">Select All</button>
+        <button id="btn-select-none" title="Clear file selection">Select None</button>
+        <button id="btn-diff" title="Diff active file">Diff</button>
+        <button id="btn-add" title="Add selected unversioned files">Add</button>
+        <button id="btn-revert" title="Revert selected or active versioned files">Revert</button>
+        <span class="spacer"></span>
+        <span class="chips" id="filter-chips">
+          <button class="chip active" data-filter="all">All</button>
+          <button class="chip" data-filter="committable">Committable</button>
+          <button class="chip" data-filter="modified">Modified</button>
+          <button class="chip" data-filter="added">Added</button>
+          <button class="chip" data-filter="deleted">Deleted</button>
+          <button class="chip" data-filter="unversioned">Unversioned</button>
+          <button class="chip" data-filter="problem">Problems</button>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-check"></th>
+              <th class="col-status">Status</th>
+              <th>Path</th>
+              <th class="col-warning">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="file-body"></tbody>
+        </table>
+        <div class="empty" id="empty-state">Loading SVN status...</div>
+      </div>
+    </main>
+
+    <footer>
+      <div class="status-line" id="status-line">Loading SVN status...</div>
+      <button id="btn-cancel">Cancel</button>
+      <button class="primary" id="btn-commit" disabled>Commit</button>
+    </footer>
+  </div>
+
+  <script nonce="${nonce}">
+    (function () {
+      var vscode = acquireVsCodeApi();
+      var snapshot = null;
+      var items = [];
+      var busy = false;
+      var activePath = '';
+      var filter = 'all';
+
+      var statusPill = document.getElementById('status-pill');
+      var targetLabel = document.getElementById('target-label');
+      var repoLabel = document.getElementById('repo-label');
+      var messageInput = document.getElementById('commit-message');
+      var fileBody = document.getElementById('file-body');
+      var emptyState = document.getElementById('empty-state');
+      var statusLine = document.getElementById('status-line');
+      var btnRefresh = document.getElementById('btn-refresh');
+      var btnSelectAll = document.getElementById('btn-select-all');
+      var btnSelectNone = document.getElementById('btn-select-none');
+      var btnDiff = document.getElementById('btn-diff');
+      var btnAdd = document.getElementById('btn-add');
+      var btnRevert = document.getElementById('btn-revert');
+      var btnCancel = document.getElementById('btn-cancel');
+      var btnCommit = document.getElementById('btn-commit');
+      var chips = document.getElementById('filter-chips');
+
+      function statusClass(item) {
+        var status = String(item && item.status || '').toUpperCase();
+        if (status === 'M') return 'modified';
+        if (status === 'P') return 'props';
+        if (status === 'A') return 'added';
+        if (status === 'D') return 'deleted';
+        if (status === 'R') return 'replaced';
+        if (status === 'C') return 'conflict';
+        if (status === '?') return 'unversioned';
+        if (status === '!') return 'missing';
+        return 'default';
+      }
+
+      function selectedItems() {
+        return items.filter(function (item) {
+          return !!item.selected && !!item.canCommit;
+        });
+      }
+
+      function selectedPathsOrActive() {
+        var paths = selectedItems().map(function (item) { return item.fsPath; });
+        if (!paths.length && activePath) {
+          paths.push(activePath);
+        }
+        return paths;
+      }
+
+      function activeItem() {
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].fsPath === activePath) {
+            return items[i];
+          }
+        }
+        return null;
+      }
+
+      function setStatus(message, kind) {
+        statusLine.textContent = message || '';
+        statusLine.classList.remove('error');
+        statusLine.classList.remove('ok');
+        if (kind) {
+          statusLine.classList.add(kind);
+        }
+      }
+
+      function setBusy(message) {
+        busy = true;
+        setStatus(message || 'Working...', '');
+        updateButtons();
+      }
+
+      function setReady(message, kind) {
+        busy = false;
+        setStatus(message || '', kind || '');
+        updateButtons();
+      }
+
+      function updateButtons() {
+        var selected = selectedItems();
+        var hasSelected = selected.length > 0;
+        var hasMessage = !!(messageInput.value || '').trim();
+        var active = activeItem();
+        btnRefresh.disabled = busy;
+        btnSelectAll.disabled = busy || !items.length;
+        btnSelectNone.disabled = busy || !items.length;
+        btnDiff.disabled = busy || (!active && !hasSelected);
+        btnAdd.disabled = busy || !items.some(function (item) { return item.selected && item.isUnversioned; });
+        btnRevert.disabled = busy || !(items.some(function (item) { return item.selected && item.canRevert; }) || (active && active.canRevert));
+        btnCommit.disabled = busy || !hasMessage || !hasSelected;
+      }
+
+      function itemMatchesFilter(item) {
+        var cls = statusClass(item);
+        if (filter === 'all') return true;
+        if (filter === 'committable') return !!item.canCommit;
+        if (filter === 'modified') return cls === 'modified' || cls === 'props';
+        if (filter === 'added') return cls === 'added';
+        if (filter === 'deleted') return cls === 'deleted' || cls === 'replaced';
+        if (filter === 'unversioned') return cls === 'unversioned';
+        if (filter === 'problem') return cls === 'conflict' || cls === 'missing' || cls === 'default';
+        return true;
+      }
+
+      function visibleCount() {
+        return items.filter(itemMatchesFilter).length;
+      }
+
+      function renderSummary() {
+        var selected = selectedItems().length;
+        var committable = items.filter(function (item) { return item.canCommit; }).length;
+        var total = items.length;
+        var visible = visibleCount();
+        var base = 'Selected ' + selected + ' of ' + committable + ' committable file(s)';
+        if (visible !== total) {
+          base += ' - showing ' + visible + ' of ' + total;
+        } else {
+          base += ' - total ' + total;
+        }
+        if (!busy) {
+          setStatus(base, '');
+        }
+      }
+
+      function render() {
+        fileBody.innerHTML = '';
+        var visible = items.filter(itemMatchesFilter);
+        emptyState.style.display = visible.length ? 'none' : 'block';
+        emptyState.textContent = items.length ? 'No files match this filter.' : 'No local SVN changes.';
+
+        visible.forEach(function (item) {
+          var row = document.createElement('tr');
+          row.className = 'row-' + statusClass(item);
+          if (item.fsPath === activePath) {
+            row.classList.add('active');
+          }
+          row.title = item.path + (item.warning ? ' - ' + item.warning : '');
+
+          var checkCell = document.createElement('td');
+          checkCell.className = 'col-check';
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = !!item.selected;
+          checkbox.disabled = busy || !item.canCommit;
+          checkbox.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+          });
+          checkbox.addEventListener('change', function () {
+            item.selected = checkbox.checked;
+            updateButtons();
+            renderSummary();
+          });
+          checkCell.appendChild(checkbox);
+
+          var statusCell = document.createElement('td');
+          statusCell.className = 'col-status';
+          var badge = document.createElement('span');
+          badge.className = 'badge ' + statusClass(item);
+          badge.textContent = item.status || '?';
+          badge.title = item.statusText || '';
+          statusCell.appendChild(badge);
+
+          var pathCell = document.createElement('td');
+          pathCell.className = 'path-cell';
+          pathCell.textContent = item.path || item.fsPath || '';
+
+          var warningCell = document.createElement('td');
+          warningCell.className = item.warning ? 'col-warning warn' : 'col-warning muted';
+          warningCell.textContent = item.warning || item.statusText || '';
+
+          row.appendChild(checkCell);
+          row.appendChild(statusCell);
+          row.appendChild(pathCell);
+          row.appendChild(warningCell);
+
+          row.addEventListener('click', function () {
+            activePath = item.fsPath;
+            render();
+          });
+          row.addEventListener('dblclick', function () {
+            activePath = item.fsPath;
+            vscode.postMessage({ type: 'diff', path: item.fsPath });
+          });
+
+          fileBody.appendChild(row);
+        });
+
+        renderSummary();
+        updateButtons();
+      }
+
+      window.addEventListener('message', function (event) {
+        var message = event.data || {};
+        if (message.type === 'busy') {
+          setBusy(message.message || 'Working...');
+        } else if (message.type === 'snapshot') {
+          snapshot = message.snapshot || {};
+          items = Array.isArray(snapshot.items) ? snapshot.items : [];
+          activePath = items.length ? items[0].fsPath : '';
+          statusPill.textContent = snapshot.status || 'SVN';
+          targetLabel.textContent = snapshot.targetLabel || snapshot.targetPath || '';
+          targetLabel.title = snapshot.targetPath || '';
+          var repo = snapshot.url || '';
+          if (snapshot.workingCopyRoot) {
+            repo += repo ? ' - ' + snapshot.workingCopyRoot : snapshot.workingCopyRoot;
+          }
+          repoLabel.textContent = repo;
+          repoLabel.title = repo;
+          busy = false;
+          render();
+        } else if (message.type === 'operationError') {
+          setReady(message.message || 'SVN operation failed.', 'error');
+        } else if (message.type === 'operationInfo') {
+          setReady(message.message || 'Done.', 'ok');
+        }
+      });
+
+      messageInput.addEventListener('input', updateButtons);
+
+      btnRefresh.addEventListener('click', function () {
+        vscode.postMessage({ type: 'refresh' });
+      });
+      btnSelectAll.addEventListener('click', function () {
+        items.forEach(function (item) {
+          if (item.canCommit) item.selected = true;
+        });
+        render();
+      });
+      btnSelectNone.addEventListener('click', function () {
+        items.forEach(function (item) { item.selected = false; });
+        render();
+      });
+      btnDiff.addEventListener('click', function () {
+        var item = activeItem() || selectedItems()[0];
+        if (!item) return;
+        vscode.postMessage({ type: 'diff', path: item.fsPath });
+      });
+      btnAdd.addEventListener('click', function () {
+        vscode.postMessage({
+          type: 'add',
+          paths: items.filter(function (item) { return item.selected && item.isUnversioned; }).map(function (item) { return item.fsPath; })
+        });
+      });
+      btnRevert.addEventListener('click', function () {
+        vscode.postMessage({ type: 'revert', paths: selectedPathsOrActive() });
+      });
+      btnCancel.addEventListener('click', function () {
+        vscode.postMessage({ type: 'cancel' });
+      });
+      btnCommit.addEventListener('click', function () {
+        vscode.postMessage({
+          type: 'commit',
+          message: messageInput.value || '',
+          paths: selectedItems().map(function (item) { return item.fsPath; })
+        });
+      });
+
+      chips.addEventListener('click', function (ev) {
+        var target = ev.target;
+        if (!target || !target.getAttribute || !target.getAttribute('data-filter')) return;
+        filter = target.getAttribute('data-filter');
+        Array.prototype.slice.call(chips.querySelectorAll('.chip')).forEach(function (chip) {
+          chip.classList.toggle('active', chip.getAttribute('data-filter') === filter);
+        });
+        render();
+      });
+
+      updateButtons();
+      vscode.postMessage({ type: 'ready' });
+    })();
   </script>
 </body>
 </html>`;
