@@ -81,6 +81,24 @@ interface P4Snapshot {
   updatedAt: number;
 }
 
+interface SvnStatusItem {
+  path: string;
+  fsPath: string;
+  status: string;
+  propStatus: string;
+  treeStatus: string;
+}
+
+interface SvnSnapshot {
+  available: boolean;
+  status: string;
+  workingCopyRoot: string;
+  url: string;
+  revision: string;
+  items: SvnStatusItem[];
+  updatedAt: number;
+}
+
 type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
 
 interface UpdateStatusPayload {
@@ -533,6 +551,15 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     pendingChanges: [],
     updatedAt: 0
   };
+  private svnSnapshot: SvnSnapshot = {
+    available: false,
+    status: 'Loading SVN...',
+    workingCopyRoot: '',
+    url: '',
+    revision: '',
+    items: [],
+    updatedAt: 0
+  };
   private pendingPinExTab: string | null = null;
   private pendingPinExLocateUri: string | null = null;
   // (FRE Preview Panel 已移除)
@@ -753,6 +780,27 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         case 'openP4File':
           if (typeof msg.path === 'string' && msg.path) {
             void this.openP4LocalFile(msg.path);
+          }
+          break;
+        case 'getSvnSnapshot':
+        case 'refreshSvn':
+          void this.refreshSvnSnapshot();
+          break;
+        case 'svnUpdate':
+          void this.svnUpdateWorkingCopy();
+          break;
+        case 'svnAddCurrent':
+          void this.svnAddCurrentFile();
+          break;
+        case 'svnRevertCurrent':
+          void this.svnRevertCurrentFile();
+          break;
+        case 'svnDiffCurrent':
+          void this.svnDiffCurrentFile();
+          break;
+        case 'openSvnFile':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.openSvnLocalFile(msg.path);
           }
           break;
         case 'revealPinEx':
@@ -1065,6 +1113,16 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  postSvnSnapshot(): void {
+    if (!this.view) {
+      return;
+    }
+    this.view.webview.postMessage({
+      type: 'svnSnapshot',
+      snapshot: this.svnSnapshot
+    });
+  }
+
   private getP4WorkingDirectory(): string {
     const editorPath = vscode.window.activeTextEditor?.document?.uri?.scheme === 'file'
       ? vscode.window.activeTextEditor.document.uri.fsPath
@@ -1086,6 +1144,69 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       maxBuffer: 8 * 1024 * 1024
     });
     return `${result.stdout || ''}${result.stderr || ''}`.trim();
+  }
+
+  private getSvnWorkingDirectory(): string {
+    const editorPath = vscode.window.activeTextEditor?.document?.uri?.scheme === 'file'
+      ? vscode.window.activeTextEditor.document.uri.fsPath
+      : '';
+    if (editorPath) {
+      const normalized = editorPath.replace(/[\\/][^\\/]+$/, '');
+      if (normalized) {
+        return normalized;
+      }
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri.fsPath || process.cwd();
+  }
+
+  private async runSvn(args: string[], cwd?: string): Promise<string> {
+    const result = await execFileAsync('svn', args, {
+      cwd: cwd || this.getSvnWorkingDirectory(),
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    return `${result.stdout || ''}${result.stderr || ''}`.trim();
+  }
+
+  private parseSvnStatusLine(line: string, root: string): SvnStatusItem | null {
+    if (!line || line.length < 2) {
+      return null;
+    }
+    const status = line.charAt(0);
+    const propStatus = line.charAt(1);
+    const treeStatus = line.charAt(6);
+    const rawPath = line.length > 8 ? line.substring(8).trim() : '';
+    if (!rawPath) {
+      return null;
+    }
+
+    const fsPath = path.isAbsolute(rawPath)
+      ? rawPath
+      : path.resolve(root, rawPath);
+    const displayPath = vscode.workspace.asRelativePath(vscode.Uri.file(fsPath), false) || rawPath;
+    return {
+      path: displayPath,
+      fsPath: fsPath,
+      status: status,
+      propStatus: propStatus,
+      treeStatus: treeStatus
+    };
+  }
+
+  private getSvnActionLabel(item: SvnStatusItem): string {
+    const status = String(item.status || '').trim();
+    if (status === 'M') return 'modified';
+    if (status === 'A') return 'added';
+    if (status === 'D') return 'deleted';
+    if (status === 'R') return 'replaced';
+    if (status === 'C') return 'conflict';
+    if (status === '?') return 'unversioned';
+    if (status === '!') return 'missing';
+    if (status === '~') return 'obstructed';
+    if (status === 'I') return 'ignored';
+    if (status === 'X') return 'external';
+    return status || 'changed';
   }
 
   private async tryLaunchP4Vc(args: string[], cwd?: string): Promise<boolean> {
@@ -1191,6 +1312,159 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       };
     }
     this.postP4Snapshot();
+  }
+
+  async refreshSvnSnapshot(): Promise<void> {
+    const cwd = this.getSvnWorkingDirectory();
+    try {
+      const infoText = await this.runSvn(['info'], cwd);
+      const workingCopyRoot = (infoText.match(/^Working Copy Root Path:\s*(.+)$/m)?.[1] || '').trim();
+      const url = (infoText.match(/^URL:\s*(.+)$/m)?.[1] || '').trim();
+      const revision = (infoText.match(/^Revision:\s*(.+)$/m)?.[1] || '').trim();
+      const root = workingCopyRoot || cwd;
+
+      const statusText = await this.runSvn(['status'], root).catch(() => '');
+      const items = statusText
+        ? statusText.split(/\r?\n/)
+            .map(line => this.parseSvnStatusLine(line, root))
+            .filter(Boolean) as SvnStatusItem[]
+        : [];
+
+      this.svnSnapshot = {
+        available: true,
+        status: `Connected${revision ? ' · r' + revision : ''}`,
+        workingCopyRoot: root,
+        url: url,
+        revision: revision,
+        items: items,
+        updatedAt: Date.now()
+      };
+    } catch (error: any) {
+      this.svnSnapshot = {
+        available: false,
+        status: (error && error.message) ? `SVN unavailable: ${error.message}` : 'SVN unavailable',
+        workingCopyRoot: '',
+        url: '',
+        revision: '',
+        items: [],
+        updatedAt: Date.now()
+      };
+    }
+    this.postSvnSnapshot();
+  }
+
+  private async svnUpdateWorkingCopy(): Promise<void> {
+    const root = this.svnSnapshot.workingCopyRoot || this.getSvnWorkingDirectory();
+    const output = await this.runSvn(['update'], root);
+    await this.refreshSvnSnapshot();
+    vscode.window.showInformationMessage(output || 'SVN: working copy updated.');
+  }
+
+  private async svnAddCurrentFile(): Promise<void> {
+    const uri = vscode.window.activeTextEditor?.document?.uri;
+    if (!uri || uri.scheme !== 'file') {
+      vscode.window.showWarningMessage('SVN: no active local file.');
+      return;
+    }
+    await this.svnAddFile(uri);
+  }
+
+  private async svnRevertCurrentFile(): Promise<void> {
+    const uri = vscode.window.activeTextEditor?.document?.uri;
+    if (!uri || uri.scheme !== 'file') {
+      vscode.window.showWarningMessage('SVN: no active local file.');
+      return;
+    }
+    await this.svnRevertFile(uri);
+  }
+
+  private async svnDiffCurrentFile(): Promise<void> {
+    const uri = vscode.window.activeTextEditor?.document?.uri;
+    if (!uri || uri.scheme !== 'file') {
+      vscode.window.showWarningMessage('SVN: no active local file.');
+      return;
+    }
+    await this.svnDiffBaseFile(uri);
+  }
+
+  async svnUpdate(resource?: any): Promise<void> {
+    const uri = this.resolveTargetFileUri(resource);
+    const target = uri ? uri.fsPath : (this.svnSnapshot.workingCopyRoot || this.getSvnWorkingDirectory());
+    const output = await this.runSvn(['update', target], this.getSvnWorkingDirectory());
+    await this.refreshSvnSnapshot();
+    vscode.window.setStatusBarMessage(output || 'SVN updated.', 3000);
+  }
+
+  async svnAddFile(resource?: any): Promise<void> {
+    const uri = this.resolveTargetFileUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('SVN: no local file selected.');
+      return;
+    }
+    await this.runSvn(['add', uri.fsPath], this.getSvnWorkingDirectory());
+    await this.refreshSvnSnapshot();
+    vscode.window.setStatusBarMessage(`SVN add: ${vscode.workspace.asRelativePath(uri, false)}`, 2000);
+  }
+
+  async svnRevertFile(resource?: any): Promise<void> {
+    const uri = this.resolveTargetFileUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('SVN: no local file selected.');
+      return;
+    }
+    const confirm = await vscode.window.showWarningMessage(
+      `SVN: revert ${vscode.workspace.asRelativePath(uri, false)}?`,
+      { modal: true },
+      'Revert'
+    );
+    if (confirm !== 'Revert') {
+      return;
+    }
+    await this.runSvn(['revert', uri.fsPath], this.getSvnWorkingDirectory());
+    await this.refreshSvnSnapshot();
+    vscode.window.setStatusBarMessage(`SVN reverted: ${vscode.workspace.asRelativePath(uri, false)}`, 2000);
+  }
+
+  async svnDiffBaseFile(resource?: any): Promise<void> {
+    const uri = this.resolveTargetFileUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('SVN: no local file selected.');
+      return;
+    }
+    const diffText = await this.runSvn(['diff', uri.fsPath], this.getSvnWorkingDirectory()).catch((error: any) => {
+      return (error && (error.stdout || error.stderr || error.message)) ? String(error.stdout || error.stderr || error.message) : 'No diff output.';
+    });
+    const doc = await vscode.workspace.openTextDocument({
+      language: 'diff',
+      content: diffText || 'No diff output.'
+    });
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  async svnFileHistory(resource?: any): Promise<void> {
+    const uri = this.resolveTargetFileUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('SVN: no local file selected.');
+      return;
+    }
+    const historyText = await this.runSvn(['log', '-l', '30', uri.fsPath], this.getSvnWorkingDirectory());
+    const doc = await vscode.workspace.openTextDocument({
+      language: 'plaintext',
+      content: historyText || 'No history output.'
+    });
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  private async openSvnLocalFile(filePath: string): Promise<void> {
+    try {
+      const uri = vscode.Uri.file(filePath);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, { preview: false });
+      this.noteOpenFileRecentlyUsed(uri);
+      this.schedulePostOpenFiles();
+    } catch {
+      vscode.window.showWarningMessage(`SVN: unable to open file: ${filePath}`);
+    }
   }
 
   private async p4EditCurrentFile(): Promise<void> {
@@ -2603,6 +2877,7 @@ export function activate(context: vscode.ExtensionContext) {
   commentManager.onDidActiveLineComment(p => provider.highlightActiveComment(p));
   pinExManager.onDidChange(() => provider.postPinEx());
   void provider.refreshP4Snapshot();
+  void provider.refreshSvnSnapshot();
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(() => {
       provider.clearReferenceQueryCache();
@@ -2879,6 +3154,21 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('cursorToolWindow.p4FileHistory', async (resource?: any) => {
       await provider.p4FileHistory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnUpdate', async (resource?: any) => {
+      await provider.svnUpdate(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnAdd', async (resource?: any) => {
+      await provider.svnAddFile(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnRevert', async (resource?: any) => {
+      await provider.svnRevertFile(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnDiffBase', async (resource?: any) => {
+      await provider.svnDiffBaseFile(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnFileHistory', async (resource?: any) => {
+      await provider.svnFileHistory(resource);
     }),
     vscode.commands.registerCommand('cursorToolWindow.openKeyboardShortcuts', async () => {
       // 打开快捷键设置页面
@@ -6015,6 +6305,7 @@ function getWebviewContent(version: string): string {
             <button class="pinex-tab" data-tab="pin" draggable="false" title="Pinned"><span class="tab-icon">&#128204;</span><span class="tab-text">Pinned</span></button>
             <button class="pinex-tab" data-tab="open" draggable="false" title="Open"><span class="tab-icon">&#128193;</span><span class="tab-text">Open</span></button>
             <button class="pinex-tab" data-tab="p4" draggable="false" title="P4"><span class="tab-icon">P</span><span class="tab-text">P4</span></button>
+            <button class="pinex-tab" data-tab="svn" draggable="false" title="SVN"><span class="tab-icon">S</span><span class="tab-text">SVN</span></button>
             <button class="pinex-tab" data-tab="symbol" draggable="false" title="Symbols"><span class="tab-icon">&#9670;</span><span class="tab-text">Symbols</span></button>
             <button class="pinex-tab" data-tab="refs" draggable="false" title="References"><span class="tab-icon">&#128279;</span><span class="tab-text">References</span></button>
           </div>
@@ -6071,6 +6362,16 @@ function getWebviewContent(version: string): string {
               <button class="pinex-toolbar-icon" id="p4-revert-current-btn-inline" title="Revert current file">Revert</button>
             </div>
             <div class="p4-panel scroll-area" id="p4-panel"></div>
+          </div>
+          <div class="pinex-tab-content" id="pinex-svn-content">
+            <div class="pinex-inline-toolbar">
+              <button class="pinex-toolbar-icon" id="svn-refresh-btn-inline" title="Refresh SVN">&#8635;</button>
+              <button class="pinex-toolbar-icon" id="svn-update-btn-inline" title="Update working copy">Update</button>
+              <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
+              <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
+              <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
+            </div>
+            <div class="p4-panel scroll-area" id="svn-panel"></div>
           </div>
           <div class="pinex-tab-content" id="pinex-symbol-content">
             <div class="symbol-panel">
@@ -6187,6 +6488,7 @@ function getWebviewContent(version: string): string {
       var pinExListEl = document.getElementById('pinex-list');
       var pinExOpenListEl = document.getElementById('pinex-open-list');
       var p4PanelEl = document.getElementById('p4-panel');
+      var svnPanelEl = document.getElementById('svn-panel');
       var refsSessionListEl = document.getElementById('refs-session-list');
       var refsResultListEl = document.getElementById('refs-result-list');
       var refsResizer = document.getElementById('refs-resizer');
@@ -6267,7 +6569,7 @@ function getWebviewContent(version: string): string {
       var symbolNotCs = false;
       var selectedSymbolClass = null;
       var pinExActiveTab = 'todo';
-      var defaultPinExTabOrder = ['todo', 'comment', 'pin', 'open', 'p4', 'symbol', 'refs'];
+      var defaultPinExTabOrder = ['todo', 'comment', 'pin', 'open', 'p4', 'svn', 'symbol', 'refs'];
       var pinExTabOrder = defaultPinExTabOrder.slice();
       var cardCollapsed = {};
       var cardHeights = {};
@@ -6282,6 +6584,7 @@ function getWebviewContent(version: string): string {
       var refsSelectedBySession = {};
       var refsVisibleCountBySession = {};
       var p4Snapshot = { available: false, status: 'Loading P4...', clientName: '', clientRoot: '', opened: [], pendingChanges: [], updatedAt: 0 };
+      var svnSnapshot = { available: false, status: 'Loading SVN...', workingCopyRoot: '', url: '', revision: '', items: [], updatedAt: 0 };
 
       setPinExBootStatus('boot: state vars ready');
 
@@ -6869,6 +7172,9 @@ function getWebviewContent(version: string): string {
         } else if (message.type === 'p4Snapshot' && message.snapshot) {
           p4Snapshot = message.snapshot;
           renderP4();
+        } else if (message.type === 'svnSnapshot' && message.snapshot) {
+          svnSnapshot = message.snapshot;
+          renderSvn();
         } else if (message.type === 'switchPinExTab' && typeof message.tab === 'string') {
           switchPinExTab(message.tab);
         } else if (message.type === 'pinExLocateToUri' && typeof message.uri === 'string') {
@@ -6989,6 +7295,42 @@ function getWebviewContent(version: string): string {
         p4RevertCurrentBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
           vscode.postMessage({ type: 'p4RevertCurrent' });
+        });
+      }
+
+      var svnRefreshBtn = document.getElementById('svn-refresh-btn-inline');
+      if (svnRefreshBtn) {
+        svnRefreshBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'refreshSvn' });
+        });
+      }
+      var svnUpdateBtn = document.getElementById('svn-update-btn-inline');
+      if (svnUpdateBtn) {
+        svnUpdateBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnUpdate' });
+        });
+      }
+      var svnAddCurrentBtn = document.getElementById('svn-add-current-btn-inline');
+      if (svnAddCurrentBtn) {
+        svnAddCurrentBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnAddCurrent' });
+        });
+      }
+      var svnDiffCurrentBtn = document.getElementById('svn-diff-current-btn-inline');
+      if (svnDiffCurrentBtn) {
+        svnDiffCurrentBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnDiffCurrent' });
+        });
+      }
+      var svnRevertCurrentBtn = document.getElementById('svn-revert-current-btn-inline');
+      if (svnRevertCurrentBtn) {
+        svnRevertCurrentBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnRevertCurrent' });
         });
       }
 
@@ -7652,6 +7994,98 @@ function getWebviewContent(version: string): string {
           noneOpened.textContent = 'No opened files.';
           p4PanelEl.appendChild(noneOpened);
         }
+      }
+
+      function renderSvn() {
+        if (!svnPanelEl) return;
+        svnPanelEl.innerHTML = '';
+
+        function getSvnActionInfo(item) {
+          var raw = String((item && item.status) || '').trim();
+          if (raw === 'M') return { key: 'edit', label: 'M', text: 'modified' };
+          if (raw === 'A') return { key: 'add', label: 'A', text: 'added' };
+          if (raw === 'D') return { key: 'delete', label: 'D', text: 'deleted' };
+          if (raw === 'R') return { key: 'branch', label: 'R', text: 'replaced' };
+          if (raw === 'C') return { key: 'delete', label: 'C', text: 'conflict' };
+          if (raw === '?') return { key: 'default', label: '?', text: 'unversioned' };
+          if (raw === '!') return { key: 'delete', label: '!', text: 'missing' };
+          if (raw === '~') return { key: 'default', label: '~', text: 'obstructed' };
+          if (raw === 'I') return { key: 'default', label: 'I', text: 'ignored' };
+          if (raw === 'X') return { key: 'integrate', label: 'X', text: 'external' };
+          return { key: 'default', label: (raw || '?').slice(0, 2).toUpperCase(), text: raw || 'changed' };
+        }
+
+        var summary = document.createElement('div');
+        summary.className = 'refs-toolbar';
+
+        var status = document.createElement('div');
+        status.className = 'refs-status';
+        status.textContent = svnSnapshot.status || 'SVN';
+        summary.appendChild(status);
+        svnPanelEl.appendChild(summary);
+
+        if (!svnSnapshot.available) {
+          var empty = document.createElement('div');
+          empty.className = 'refs-empty';
+          empty.textContent = 'SVN is not available for the current workspace.';
+          svnPanelEl.appendChild(empty);
+          return;
+        }
+
+        var meta = document.createElement('div');
+        meta.className = 'refs-load-more-meta';
+        var rootName = svnSnapshot.workingCopyRoot
+          ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop()
+          : 'working copy';
+        meta.textContent = 'Changed: ' + (svnSnapshot.items || []).length + ' · ' + rootName;
+        svnPanelEl.appendChild(meta);
+
+        if (!svnSnapshot.items || !svnSnapshot.items.length) {
+          var clean = document.createElement('div');
+          clean.className = 'refs-empty';
+          clean.textContent = 'No local SVN changes.';
+          svnPanelEl.appendChild(clean);
+          return;
+        }
+
+        var changedHeader = document.createElement('div');
+        changedHeader.className = 'refs-file-title';
+        changedHeader.textContent = 'Working Copy Changes';
+        svnPanelEl.appendChild(changedHeader);
+
+        svnSnapshot.items.forEach(function (item) {
+          var row = document.createElement('div');
+          row.className = 'pinex-item p4-file-row';
+          row.title = item.path || item.fsPath || '';
+
+          var actionInfo = getSvnActionInfo(item);
+          var badge = document.createElement('span');
+          badge.className = 'p4-action-badge ' + actionInfo.key;
+          badge.textContent = actionInfo.label;
+          badge.title = actionInfo.text;
+
+          var name = document.createElement('span');
+          name.className = 'p4-file-name';
+          var displayName = (item.path || item.fsPath || '').replace(/\\\\/g, '/').split('/').pop();
+          name.textContent = (displayName || item.path || item.fsPath || '') + ' ';
+
+          var metaSpan = document.createElement('span');
+          metaSpan.className = 'p4-file-meta';
+          metaSpan.textContent = actionInfo.text;
+
+          row.appendChild(badge);
+          row.appendChild(name);
+          row.appendChild(metaSpan);
+
+          if (item.fsPath) {
+            row.addEventListener('dblclick', function (ev) {
+              ev.stopPropagation();
+              vscode.postMessage({ type: 'openSvnFile', path: item.fsPath });
+            });
+          }
+
+          svnPanelEl.appendChild(row);
+        });
       }
 
       function renderReferences() {
@@ -8434,6 +8868,7 @@ function getWebviewContent(version: string): string {
               (tabName === 'pin' && content.id === 'pinex-pin-content') ||
               (tabName === 'open' && content.id === 'pinex-open-content') ||
               (tabName === 'p4' && content.id === 'pinex-p4-content') ||
+              (tabName === 'svn' && content.id === 'pinex-svn-content') ||
               (tabName === 'refs' && content.id === 'pinex-refs-content') ||
               (tabName === 'symbol' && content.id === 'pinex-symbol-content')) {
             content.classList.add('active');
@@ -8453,6 +8888,9 @@ function getWebviewContent(version: string): string {
         } else if (tabName === 'p4') {
           vscode.postMessage({ type: 'getP4Snapshot' });
           renderP4();
+        } else if (tabName === 'svn') {
+          vscode.postMessage({ type: 'getSvnSnapshot' });
+          renderSvn();
         } else if (tabName === 'refs') {
           // 请求最新引用会话并渲染
           vscode.postMessage({ type: 'getReferenceSessions' });

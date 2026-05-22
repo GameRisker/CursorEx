@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.88",
+  "version": "0.1.89",
   "publisher": "danyang",
   "repository": {
     "type": "git",
@@ -20,6 +20,11 @@
     "onCommand:cursorToolWindow.open",
     "onCommand:cursorToolWindow.checkForUpdates",
     "onCommand:cursorToolWindow.installUpdate",
+    "onCommand:cursorToolWindow.svnUpdate",
+    "onCommand:cursorToolWindow.svnAdd",
+    "onCommand:cursorToolWindow.svnRevert",
+    "onCommand:cursorToolWindow.svnDiffBase",
+    "onCommand:cursorToolWindow.svnFileHistory",
     "onView:cursorToolWindow.sidebar"
   ],
   "contributes": {
@@ -111,6 +116,31 @@
         "category": "Cursor Tools"
       },
       {
+        "command": "cursorToolWindow.svnUpdate",
+        "title": "SVN Update",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnAdd",
+        "title": "SVN Add",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnRevert",
+        "title": "SVN Revert",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnDiffBase",
+        "title": "SVN Diff Against Base",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnFileHistory",
+        "title": "SVN File History",
+        "category": "Cursor Tools"
+      },
+      {
         "command": "cursorToolWindow.openKeyboardShortcuts",
         "title": "Open Keyboard Shortcuts",
         "category": "Cursor Tools",
@@ -164,6 +194,26 @@
         {
           "command": "cursorToolWindow.p4Revert",
           "group": "3_p4@3"
+        },
+        {
+          "command": "cursorToolWindow.svnUpdate",
+          "group": "4_svn@0"
+        },
+        {
+          "command": "cursorToolWindow.svnAdd",
+          "group": "4_svn@1"
+        },
+        {
+          "command": "cursorToolWindow.svnDiffBase",
+          "group": "4_svn@2"
+        },
+        {
+          "command": "cursorToolWindow.svnFileHistory",
+          "group": "4_svn@3"
+        },
+        {
+          "command": "cursorToolWindow.svnRevert",
+          "group": "4_svn@4"
         }
       ],
       "explorer/context": [
@@ -200,6 +250,30 @@
           "command": "cursorToolWindow.p4Revert",
           "when": "explorerResourceIsFolder == false",
           "group": "3_p4@3"
+        },
+        {
+          "command": "cursorToolWindow.svnUpdate",
+          "group": "4_svn@0"
+        },
+        {
+          "command": "cursorToolWindow.svnAdd",
+          "when": "explorerResourceIsFolder == false",
+          "group": "4_svn@1"
+        },
+        {
+          "command": "cursorToolWindow.svnDiffBase",
+          "when": "explorerResourceIsFolder == false",
+          "group": "4_svn@2"
+        },
+        {
+          "command": "cursorToolWindow.svnFileHistory",
+          "when": "explorerResourceIsFolder == false",
+          "group": "4_svn@3"
+        },
+        {
+          "command": "cursorToolWindow.svnRevert",
+          "when": "explorerResourceIsFolder == false",
+          "group": "4_svn@4"
         }
       ],
       "view/title": [
