@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.87",
+  "version": "0.1.88",
   "publisher": "danyang",
   "repository": {
     "type": "git",
@@ -18,6 +18,8 @@
   "activationEvents": [
     "*",
     "onCommand:cursorToolWindow.open",
+    "onCommand:cursorToolWindow.checkForUpdates",
+    "onCommand:cursorToolWindow.installUpdate",
     "onView:cursorToolWindow.sidebar"
   ],
   "contributes": {
@@ -30,6 +32,18 @@
         "command": "cursorToolWindow.openSettings",
         "title": "Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "cursorToolWindow.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "Cursor Tools",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "cursorToolWindow.installUpdate",
+        "title": "Install Update",
+        "category": "Cursor Tools",
+        "icon": "$(desktop-download)"
       },
       {
         "command": "cursorToolWindow.addComment",

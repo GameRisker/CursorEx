@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as https from 'https';
 import { promises as fs } from 'fs';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
@@ -11,6 +12,10 @@ import { WorkspaceSearchIndex } from './workspaceSearchIndex';
 
 const EXTENSION_VERSION: string = require('../package.json').version;
 const execFileAsync = promisify(execFile);
+const UPDATE_API_URL = 'https://api.github.com/repos/GameRisker/CursorEx/releases/latest';
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_STARTUP_DELAY_MS = 5000;
+const LAST_STARTUP_UPDATE_CHECK_KEY = 'cursorToolWindow.update.lastStartupCheckAt';
 
 interface ReferenceResultItem {
   uri: string;
@@ -76,6 +81,42 @@ interface P4Snapshot {
   updatedAt: number;
 }
 
+type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
+
+interface UpdateStatusPayload {
+  currentVersion: string;
+  latestVersion?: string;
+  releaseUrl?: string;
+  assetName?: string;
+  state: UpdateState;
+  message: string;
+  canInstall: boolean;
+  checkedAt?: number;
+}
+
+interface GithubReleaseAsset {
+  name?: string;
+  browser_download_url?: string;
+}
+
+interface GithubRelease {
+  tag_name?: string;
+  html_url?: string;
+  prerelease?: boolean;
+  draft?: boolean;
+  assets?: GithubReleaseAsset[];
+}
+
+interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  tagName: string;
+  releaseUrl: string;
+  assetName: string;
+  downloadUrl: string;
+  isUpdateAvailable: boolean;
+}
+
 const DEFAULT_SEARCH_PROFILE: SearchProfile = {
   type: 'General',
   searchFileExtensions: [],
@@ -86,6 +127,385 @@ const DEFAULT_SEARCH_PROFILE: SearchProfile = {
   todoExcludeGlobs: ['**/node_modules/**', '**/bin/**', '**/obj/**'],
   pinexFileExtensions: []
 };
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function parseSemver(value: string): [number, number, number] | null {
+  const normalized = value.trim().replace(/^v/i, '').split(/[+-]/)[0];
+  const parts = normalized.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const numbers = parts.map(part => {
+    if (!/^\d+$/.test(part)) {
+      return NaN;
+    }
+    return Number(part);
+  });
+
+  if (numbers.some(n => !Number.isFinite(n))) {
+    return null;
+  }
+
+  return [numbers[0], numbers[1], numbers[2]];
+}
+
+function compareSemver(a: string, b: string): number | null {
+  const left = parseSemver(a);
+  const right = parseSemver(b);
+  if (!left || !right) {
+    return null;
+  }
+
+  for (let i = 0; i < 3; i++) {
+    if (left[i] > right[i]) return 1;
+    if (left[i] < right[i]) return -1;
+  }
+  return 0;
+}
+
+function httpsGetBuffer(url: string, headers: Record<string, string>, redirectCount = 0): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, response => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (location && [301, 302, 303, 307, 308].includes(statusCode)) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('Too many redirects while downloading update.'));
+          return;
+        }
+        resolve(httpsGetBuffer(new URL(location, url).toString(), headers, redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        reject(new Error(`GitHub request failed with HTTP ${statusCode}.`));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      response.on('data', chunk => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', reject);
+    });
+
+    request.setTimeout(30000, () => {
+      request.destroy(new Error('GitHub request timed out.'));
+    });
+    request.on('error', reject);
+  });
+}
+
+async function httpsGetJson<T>(url: string): Promise<T> {
+  const buffer = await httpsGetBuffer(url, {
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'CursorEx-Updater'
+  });
+  return JSON.parse(buffer.toString('utf8')) as T;
+}
+
+function toSafeFileName(name: string): string {
+  const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return safe || `cursor-tool-window-${Date.now()}.vsix`;
+}
+
+function postUpdateStatusToSettings(status: UpdateStatusPayload): void {
+  settingsPanel?.webview.postMessage({
+    type: 'updateStatus',
+    status: status
+  });
+}
+
+class GithubReleaseUpdateService {
+  private status: UpdateStatusPayload = {
+    currentVersion: EXTENSION_VERSION,
+    state: 'idle',
+    message: 'Ready to check for updates.',
+    canInstall: false
+  };
+  private latestAvailableUpdate: UpdateInfo | undefined;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  getStatusPayload(): UpdateStatusPayload {
+    return { ...this.status };
+  }
+
+  async checkFromCommand(): Promise<void> {
+    try {
+      const update = await this.checkForUpdates(true);
+      if (!update.isUpdateAvailable) {
+        vscode.window.showInformationMessage('Cursor Tools is already up to date.');
+        return;
+      }
+
+      const action = await vscode.window.showInformationMessage(
+        `Cursor Tools v${update.latestVersion} is available.`,
+        'Install Update',
+        'Release Notes'
+      );
+      if (action === 'Install Update') {
+        try {
+          await this.installUpdate(update, true);
+        } catch (error) {
+          vscode.window.showErrorMessage(`Failed to install update: ${getErrorMessage(error)}`);
+        }
+      } else if (action === 'Release Notes') {
+        await vscode.env.openExternal(vscode.Uri.parse(update.releaseUrl));
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to check for updates: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async installFromCommand(): Promise<void> {
+    try {
+      const update = this.latestAvailableUpdate || await this.checkForUpdates(true);
+      await this.installUpdate(update, true);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to install update: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async checkFromSettings(): Promise<void> {
+    try {
+      await this.checkForUpdates(true);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to check for updates: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async installFromSettings(): Promise<void> {
+    try {
+      const update = this.latestAvailableUpdate || await this.checkForUpdates(true);
+      await this.installUpdate(update, true);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to install update: ${getErrorMessage(error)}`);
+    }
+  }
+
+  async checkOnStartup(): Promise<void> {
+    const now = Date.now();
+    const lastCheckAt = this.context.globalState.get<number>(LAST_STARTUP_UPDATE_CHECK_KEY, 0);
+    if (now - lastCheckAt < UPDATE_CHECK_INTERVAL_MS) {
+      return;
+    }
+
+    await this.context.globalState.update(LAST_STARTUP_UPDATE_CHECK_KEY, now);
+
+    try {
+      const update = await this.checkForUpdates(false);
+      if (!update.isUpdateAvailable) {
+        return;
+      }
+
+      const action = await vscode.window.showInformationMessage(
+        `Cursor Tools v${update.latestVersion} is available.`,
+        'Install Update',
+        'Release Notes'
+      );
+      if (action === 'Install Update') {
+        try {
+          await this.installUpdate(update, false);
+        } catch (error) {
+          vscode.window.showErrorMessage(`Failed to install update: ${getErrorMessage(error)}`);
+        }
+      } else if (action === 'Release Notes') {
+        await vscode.env.openExternal(vscode.Uri.parse(update.releaseUrl));
+      }
+    } catch (error) {
+      console.error('[CursorEx] Startup update check failed:', error);
+    }
+  }
+
+  private async checkForUpdates(manual: boolean): Promise<UpdateInfo> {
+    this.setStatus({
+      state: 'checking',
+      message: 'Checking GitHub Releases...',
+      latestVersion: undefined,
+      releaseUrl: undefined,
+      assetName: undefined,
+      canInstall: false,
+      checkedAt: Date.now()
+    });
+
+    try {
+      const release = await httpsGetJson<GithubRelease>(UPDATE_API_URL);
+      const tagName = typeof release.tag_name === 'string' ? release.tag_name : '';
+      const latestVersion = tagName.replace(/^v/i, '');
+      const releaseUrl = typeof release.html_url === 'string' ? release.html_url : 'https://github.com/GameRisker/CursorEx/releases/latest';
+      const asset = (Array.isArray(release.assets) ? release.assets : []).find(item => {
+        return typeof item.name === 'string' &&
+          item.name.toLowerCase().endsWith('.vsix') &&
+          typeof item.browser_download_url === 'string';
+      });
+
+      const comparison = compareSemver(latestVersion, EXTENSION_VERSION);
+      if (comparison === null) {
+        this.latestAvailableUpdate = undefined;
+        const info = this.createNoUpdateInfo(tagName || latestVersion || 'unknown', releaseUrl);
+        this.setStatus({
+          state: 'current',
+          latestVersion: tagName || latestVersion || undefined,
+          releaseUrl: releaseUrl,
+          message: `No compatible update found. Latest release tag is ${tagName || 'unknown'}.`,
+          canInstall: false,
+          checkedAt: Date.now()
+        });
+        return info;
+      }
+
+      if (comparison <= 0) {
+        this.latestAvailableUpdate = undefined;
+        const info = this.createNoUpdateInfo(latestVersion, releaseUrl);
+        this.setStatus({
+          state: 'current',
+          latestVersion: latestVersion,
+          releaseUrl: releaseUrl,
+          message: comparison === 0 ? 'You are on the latest version.' : `Installed version v${EXTENSION_VERSION} is newer than GitHub latest v${latestVersion}.`,
+          canInstall: false,
+          checkedAt: Date.now()
+        });
+        return info;
+      }
+
+      if (!asset || !asset.name || !asset.browser_download_url) {
+        throw new Error(`Release ${tagName} does not include a VSIX asset.`);
+      }
+
+      const update: UpdateInfo = {
+        currentVersion: EXTENSION_VERSION,
+        latestVersion: latestVersion,
+        tagName: tagName,
+        releaseUrl: releaseUrl,
+        assetName: asset.name,
+        downloadUrl: asset.browser_download_url,
+        isUpdateAvailable: true
+      };
+
+      this.latestAvailableUpdate = update;
+      this.setStatus({
+        state: 'available',
+        latestVersion: update.latestVersion,
+        releaseUrl: update.releaseUrl,
+        assetName: update.assetName,
+        message: `Update v${update.latestVersion} is available.`,
+        canInstall: true,
+        checkedAt: Date.now()
+      });
+      return update;
+    } catch (error) {
+      this.latestAvailableUpdate = undefined;
+      this.setStatus({
+        state: 'error',
+        message: `Update check failed: ${getErrorMessage(error)}`,
+        canInstall: false,
+        checkedAt: Date.now()
+      });
+      if (manual) {
+        throw error;
+      }
+      return this.createNoUpdateInfo('unknown', 'https://github.com/GameRisker/CursorEx/releases/latest');
+    }
+  }
+
+  private async installUpdate(update: UpdateInfo, manual: boolean): Promise<void> {
+    if (!update.isUpdateAvailable) {
+      if (manual) {
+        vscode.window.showInformationMessage('Cursor Tools is already up to date.');
+      }
+      return;
+    }
+
+    this.setStatus({
+      state: 'installing',
+      latestVersion: update.latestVersion,
+      releaseUrl: update.releaseUrl,
+      assetName: update.assetName,
+      message: `Downloading ${update.assetName}...`,
+      canInstall: false
+    });
+
+    try {
+      const updatesDir = path.join(this.context.globalStorageUri.fsPath, 'updates');
+      await fs.mkdir(updatesDir, { recursive: true });
+      const targetPath = path.join(updatesDir, toSafeFileName(update.assetName));
+      const buffer = await httpsGetBuffer(update.downloadUrl, {
+        'Accept': 'application/octet-stream',
+        'User-Agent': 'CursorEx-Updater'
+      });
+      await fs.writeFile(targetPath, buffer);
+
+      this.setStatus({
+        state: 'installing',
+        message: `Installing v${update.latestVersion}...`,
+        canInstall: false
+      });
+
+      await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(targetPath));
+
+      this.latestAvailableUpdate = undefined;
+      this.setStatus({
+        state: 'installed',
+        latestVersion: update.latestVersion,
+        releaseUrl: update.releaseUrl,
+        assetName: update.assetName,
+        message: `Installed v${update.latestVersion}. Reload to activate.`,
+        canInstall: false
+      });
+
+      const action = await vscode.window.showInformationMessage(
+        `Cursor Tools v${update.latestVersion} installed. Reload window to activate it.`,
+        'Reload Window'
+      );
+      if (action === 'Reload Window') {
+        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    } catch (error) {
+      this.setStatus({
+        state: 'error',
+        latestVersion: update.latestVersion,
+        releaseUrl: update.releaseUrl,
+        assetName: update.assetName,
+        message: `Install failed: ${getErrorMessage(error)}`,
+        canInstall: true
+      });
+      throw error;
+    }
+  }
+
+  private createNoUpdateInfo(latestVersion: string, releaseUrl: string): UpdateInfo {
+    return {
+      currentVersion: EXTENSION_VERSION,
+      latestVersion: latestVersion,
+      tagName: latestVersion,
+      releaseUrl: releaseUrl,
+      assetName: '',
+      downloadUrl: '',
+      isUpdateAvailable: false
+    };
+  }
+
+  private setStatus(next: Partial<UpdateStatusPayload>): void {
+    this.status = {
+      ...this.status,
+      ...next,
+      currentVersion: EXTENSION_VERSION
+    };
+    postUpdateStatusToSettings(this.status);
+  }
+}
 
 class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'cursorToolWindow.sidebar';
@@ -2155,6 +2575,7 @@ export function activate(context: vscode.ExtensionContext) {
   const commentManager = new CommentManager(context);
   const pinExManager = new PinExManager(context);
   const searchIndex = new WorkspaceSearchIndex(context);
+  const updateService = new GithubReleaseUpdateService(context);
   const provider = new CursorToolSidebarProvider(context, scanner, commentManager, pinExManager);
 
   context.subscriptions.push(searchIndex);
@@ -2167,6 +2588,14 @@ export function activate(context: vscode.ExtensionContext) {
     });
   });
   sidebarProvider = provider;
+  updateServiceRef = updateService;
+
+  const startupUpdateTimer = setTimeout(() => {
+    void updateService.checkOnStartup();
+  }, UPDATE_STARTUP_DELAY_MS);
+  context.subscriptions.push({
+    dispose: () => clearTimeout(startupUpdateTimer)
+  });
 
   scanner.onDidChange(() => provider.postTodos());
   scanner.onScanningChange(isScanning => provider.postTodoScanning(isScanning));
@@ -2275,6 +2704,12 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('cursorToolWindow.openSettings', () => {
       openSettingsPanel(context);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.checkForUpdates', async () => {
+      await updateService.checkFromCommand();
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.installUpdate', async () => {
+      await updateService.installFromCommand();
     }),
     vscode.commands.registerCommand('cursorToolWindow.addComment', async (args?: any) => {
       const editor = vscode.window.activeTextEditor;
@@ -8517,6 +8952,7 @@ function getWebviewContent(version: string): string {
 
 let settingsPanel: vscode.WebviewPanel | undefined;
 let workspaceSearchIndexRef: WorkspaceSearchIndex | undefined;
+let updateServiceRef: GithubReleaseUpdateService | undefined;
 
 function openSettingsPanel(context: vscode.ExtensionContext): void {
   if (settingsPanel) {
@@ -8592,7 +9028,8 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             maxItems: config.get('quickOpen.maxItems', 50),
             previewLines: config.get('search.previewLines', 1)
           },
-          quickOpenKeybinding: quickOpenKeybinding
+          quickOpenKeybinding: quickOpenKeybinding,
+          update: updateServiceRef?.getStatusPayload()
         });
         break;
       case 'autoDetectProjectProfile':
@@ -8650,9 +9087,16 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             maxItems: config.get('quickOpen.maxItems', 50),
             previewLines: config.get('search.previewLines', 1)
           },
-          quickOpenKeybinding: await getQuickOpenKeybinding()
+          quickOpenKeybinding: await getQuickOpenKeybinding(),
+          update: updateServiceRef?.getStatusPayload()
         });
         vscode.window.showInformationMessage(`Applied search profile: ${profile.type}`);
+        break;
+      case 'checkForUpdates':
+        await updateServiceRef?.checkFromSettings();
+        break;
+      case 'installUpdate':
+        await updateServiceRef?.installFromSettings();
         break;
       case 'openKeybindings':
         // 打开快捷键设置页面
@@ -8875,6 +9319,12 @@ function getSettingsWebviewContent(): string {
     .profile-banner strong {
       color: var(--fg);
     }
+    .update-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
     .tabs {
       display: flex;
       border-bottom: 1px solid var(--border);
@@ -9004,6 +9454,14 @@ function getSettingsWebviewContent(): string {
     </div>
 
     <div id="tab-global" class="tab-content active">
+      <div class="profile-banner">
+        <div>Updates: <strong id="update-status">Ready</strong></div>
+        <div class="hint" id="update-meta" style="margin-top:6px;">Current: v${EXTENSION_VERSION}</div>
+        <div class="update-actions">
+          <button id="btn-checkUpdates" class="btn btn-secondary">Check for Updates</button>
+          <button id="btn-installUpdate" class="btn btn-primary" style="display:none;">Install Update</button>
+        </div>
+      </div>
       <div class="form-group">
         <label>Font size</label>
         <div class="hint">Set the tool window font size (10–20px)</div>
@@ -9275,6 +9733,41 @@ function getSettingsWebviewContent(): string {
         metaEl.textContent = metaParts.join(' | ');
       }
 
+      function renderUpdateStatus(status) {
+        status = status || {};
+        var statusEl = document.getElementById('update-status');
+        var metaEl = document.getElementById('update-meta');
+        var checkBtn = document.getElementById('btn-checkUpdates');
+        var installBtn = document.getElementById('btn-installUpdate');
+        if (!statusEl || !metaEl || !checkBtn || !installBtn) return;
+
+        statusEl.textContent = status.message || 'Ready to check for updates.';
+        var current = status.currentVersion || '${EXTENSION_VERSION}';
+        var metaParts = ['Current: v' + current];
+        if (status.latestVersion) {
+          metaParts.push('Latest: v' + String(status.latestVersion).replace(/^v/i, ''));
+        }
+        if (status.assetName) {
+          metaParts.push(status.assetName);
+        }
+        if (status.checkedAt) {
+          metaParts.push('Checked: ' + new Date(status.checkedAt).toLocaleString());
+        }
+        metaEl.textContent = metaParts.join(' | ');
+
+        var busy = status.state === 'checking' || status.state === 'installing';
+        checkBtn.disabled = busy;
+        installBtn.disabled = busy;
+        installBtn.style.display = status.canInstall ? '' : 'none';
+      }
+
+      renderUpdateStatus({
+        currentVersion: '${EXTENSION_VERSION}',
+        state: 'idle',
+        message: 'Ready to check for updates.',
+        canInstall: false
+      });
+
       window.addEventListener('message', function(event) {
         var msg = event.data;
         if (msg.type === 'settings') {
@@ -9332,10 +9825,15 @@ function getSettingsWebviewContent(): string {
           if (typeof msg.quickOpenKeybinding === 'string') {
             document.getElementById('pinex-quickOpenKeybinding').value = msg.quickOpenKeybinding;
           }
+          if (msg.update) {
+            renderUpdateStatus(msg.update);
+          }
         } else if (msg.type === 'detectedProfileApplied' && msg.profile) {
           document.getElementById('detected-project-profile').textContent = msg.profile.type || 'General';
         } else if (msg.type === 'searchIndexSnapshot') {
           renderSearchIndexSnapshot(msg.snapshot);
+        } else if (msg.type === 'updateStatus') {
+          renderUpdateStatus(msg.status);
         }
       });
 
@@ -9517,6 +10015,14 @@ function getSettingsWebviewContent(): string {
 
       document.getElementById('btn-autoDetectProfile').addEventListener('click', function() {
         vscode.postMessage({ type: 'autoDetectProjectProfile' });
+      });
+
+      document.getElementById('btn-checkUpdates').addEventListener('click', function() {
+        vscode.postMessage({ type: 'checkForUpdates' });
+      });
+
+      document.getElementById('btn-installUpdate').addEventListener('click', function() {
+        vscode.postMessage({ type: 'installUpdate' });
       });
 
       // 重置按钮
