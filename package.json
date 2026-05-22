@@ -4,6 +4,10 @@
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
   "version": "0.1.87",
   "publisher": "danyang",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GameRisker/CursorEx.git"
+  },
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -519,6 +523,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package:vsix": "npm version patch --no-git-tag-version && npx --yes @vscode/vsce package",
+    "package:ci": "npx --yes @vscode/vsce package",
     "lint": "echo \"no lint configured\"",
     "test": "echo \"no tests\""
   },
