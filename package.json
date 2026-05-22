@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.95",
+  "version": "0.1.96",
   "publisher": "danyang",
   "repository": {
     "type": "git",

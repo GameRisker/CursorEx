@@ -10823,37 +10823,12 @@ function getSvnCommitWorkbenchHtml(): string {
       font-family: var(--vscode-editor-font-family);
       font-size: 12px;
     }
-    .tree-toggle {
-      display: inline-flex;
-      width: 14px;
-      align-items: center;
-      justify-content: center;
-      color: var(--muted);
-      font-size: 11px;
-      flex-shrink: 0;
-    }
-    .tree-path {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      min-width: 0;
+    .file-name {
+      display: inline-block;
       max-width: 100%;
-    }
-    .tree-dir-row {
-      color: var(--fg);
-      font-weight: 500;
-    }
-    .tree-dir-name,
-    .tree-file-name {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .tree-count {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 400;
-      flex-shrink: 0;
     }
     .muted { color: var(--muted); }
     .warn { color: var(--warn, var(--danger)); }
@@ -10956,7 +10931,6 @@ function getSvnCommitWorkbenchHtml(): string {
       var busy = false;
       var activePath = '';
       var filter = 'all';
-      var treeExpanded = {};
 
       var statusPill = document.getElementById('status-pill');
       var targetLabel = document.getElementById('target-label');
@@ -11058,84 +11032,19 @@ function getSvnCommitWorkbenchHtml(): string {
         return true;
       }
 
-      function getItemParts(item) {
+      function getBaseName(item) {
         var raw = String((item && (item.path || item.fsPath)) || '').replace(/\\\\/g, '/');
-        raw = raw.replace(/^\\.\\//, '');
-        var parts = raw.split('/').filter(Boolean);
-        if (!parts.length) {
-          parts = [raw || 'unknown'];
+        var idx = raw.lastIndexOf('/');
+        if (idx >= 0 && idx < raw.length - 1) {
+          return raw.substring(idx + 1);
         }
-        return parts;
+        return raw || 'unknown';
       }
 
-      function createFileTree(sourceItems) {
-        var root = { name: '', key: '', dirs: {}, files: [], item: null };
-        (sourceItems || []).forEach(function (item) {
-          var parts = getItemParts(item);
-          var fileName = parts.pop();
-          var node = root;
-          var prefix = '';
-          parts.forEach(function (part) {
-            prefix = prefix ? prefix + '/' + part : part;
-            if (!node.dirs[part]) {
-              node.dirs[part] = { name: part, key: prefix, dirs: {}, files: [], item: null };
-            }
-            node = node.dirs[part];
-          });
-          node.files.push({ name: fileName || item.path || item.fsPath || 'unknown', item: item });
-        });
-
-        function absorbDirectoryItems(node) {
-          var kept = [];
-          node.files.forEach(function (file) {
-            var dir = node.dirs[file.name];
-            if (dir) {
-              dir.item = file.item;
-            } else {
-              kept.push(file);
-            }
-          });
-          node.files = kept;
-          Object.keys(node.dirs).forEach(function (name) {
-            absorbDirectoryItems(node.dirs[name]);
-          });
+      function sortVisibleItems(sourceItems) {
+        return (sourceItems || []).slice().sort(function (a, b) {
+          return String(a.path || a.fsPath || '').localeCompare(String(b.path || b.fsPath || ''));
         }
-
-        absorbDirectoryItems(root);
-        return root;
-      }
-
-      function collectNodeItems(node) {
-        var collected = [];
-        if (node.item) {
-          collected.push(node.item);
-        }
-        node.files.forEach(function (file) {
-          collected.push(file.item);
-        });
-        Object.keys(node.dirs).forEach(function (name) {
-          collected = collected.concat(collectNodeItems(node.dirs[name]));
-        });
-        return collected;
-      }
-
-      function nodeSelectionState(node) {
-        var committable = collectNodeItems(node).filter(function (item) { return item.canCommit; });
-        var selected = committable.filter(function (item) { return item.selected; });
-        return {
-          total: committable.length,
-          selected: selected.length,
-          checked: committable.length > 0 && selected.length === committable.length,
-          indeterminate: selected.length > 0 && selected.length < committable.length
-        };
-      }
-
-      function setNodeSelected(node, selected) {
-        collectNodeItems(node).forEach(function (item) {
-          if (item.canCommit) {
-            item.selected = selected;
-          }
-        });
       }
 
       function visibleCount() {
@@ -11164,7 +11073,7 @@ function getSvnCommitWorkbenchHtml(): string {
         emptyState.style.display = visible.length ? 'none' : 'block';
         emptyState.textContent = items.length ? 'No files match this filter.' : 'No local SVN changes.';
 
-        function renderFileRow(item, labelText, depth) {
+        function renderFileRow(item) {
           var row = document.createElement('tr');
           row.className = 'row-' + statusClass(item);
           if (item.fsPath === activePath) {
@@ -11197,18 +11106,10 @@ function getSvnCommitWorkbenchHtml(): string {
 
           var pathCell = document.createElement('td');
           pathCell.className = 'path-cell';
-          var pathWrap = document.createElement('span');
-          pathWrap.className = 'tree-path';
-          pathWrap.style.paddingLeft = String(depth * 16) + 'px';
-          var spacer = document.createElement('span');
-          spacer.className = 'tree-toggle';
-          spacer.textContent = '';
           var fileName = document.createElement('span');
-          fileName.className = 'tree-file-name';
-          fileName.textContent = labelText || item.path || item.fsPath || '';
-          pathWrap.appendChild(spacer);
-          pathWrap.appendChild(fileName);
-          pathCell.appendChild(pathWrap);
+          fileName.className = 'file-name';
+          fileName.textContent = getBaseName(item);
+          pathCell.appendChild(fileName);
 
           var warningCell = document.createElement('td');
           warningCell.className = item.warning ? 'col-warning warn' : 'col-warning muted';
@@ -11231,94 +11132,9 @@ function getSvnCommitWorkbenchHtml(): string {
           fileBody.appendChild(row);
         }
 
-        function renderDirRow(node, depth) {
-          var key = node.key || node.name;
-          if (typeof treeExpanded[key] !== 'boolean') {
-            treeExpanded[key] = true;
-          }
-          var expanded = !!treeExpanded[key];
-          var nodeItems = collectNodeItems(node);
-          var selection = nodeSelectionState(node);
-
-          var row = document.createElement('tr');
-          row.className = 'tree-dir-row';
-          row.title = key;
-
-          var checkCell = document.createElement('td');
-          checkCell.className = 'col-check';
-          var checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.checked = selection.checked;
-          checkbox.indeterminate = selection.indeterminate;
-          checkbox.disabled = busy || !selection.total;
-          checkbox.addEventListener('click', function (ev) {
-            ev.stopPropagation();
-          });
-          checkbox.addEventListener('change', function () {
-            setNodeSelected(node, checkbox.checked);
-            render();
-          });
-          checkCell.appendChild(checkbox);
-
-          var statusCell = document.createElement('td');
-          statusCell.className = 'col-status';
-          if (node.item) {
-            var actionInfo = statusClass(node.item);
-            var badge = document.createElement('span');
-            badge.className = 'badge ' + actionInfo;
-            badge.textContent = node.item.status || '?';
-            badge.title = node.item.statusText || '';
-            statusCell.appendChild(badge);
-          }
-
-          var pathCell = document.createElement('td');
-          pathCell.className = 'path-cell';
-          var pathWrap = document.createElement('span');
-          pathWrap.className = 'tree-path';
-          pathWrap.style.paddingLeft = String(depth * 16) + 'px';
-          var toggle = document.createElement('span');
-          toggle.className = 'tree-toggle';
-          toggle.textContent = expanded ? '▼' : '▶';
-          var folderName = document.createElement('span');
-          folderName.className = 'tree-dir-name';
-          folderName.textContent = node.name || key;
-          var count = document.createElement('span');
-          count.className = 'tree-count';
-          count.textContent = String(nodeItems.length);
-          pathWrap.appendChild(toggle);
-          pathWrap.appendChild(folderName);
-          pathWrap.appendChild(count);
-          pathCell.appendChild(pathWrap);
-
-          var warningCell = document.createElement('td');
-          warningCell.className = node.item && node.item.warning ? 'col-warning warn' : 'col-warning muted';
-          warningCell.textContent = node.item && node.item.warning ? node.item.warning : 'folder';
-
-          row.appendChild(checkCell);
-          row.appendChild(statusCell);
-          row.appendChild(pathCell);
-          row.appendChild(warningCell);
-          row.addEventListener('click', function () {
-            treeExpanded[key] = !treeExpanded[key];
-            render();
-          });
-
-          fileBody.appendChild(row);
-          if (expanded) {
-            renderTreeChildren(node, depth + 1);
-          }
-        }
-
-        function renderTreeChildren(node, depth) {
-          Object.keys(node.dirs).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (name) {
-            renderDirRow(node.dirs[name], depth);
-          });
-          node.files.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); }).forEach(function (file) {
-            renderFileRow(file.item, file.name, depth);
-          });
-        }
-
-        renderTreeChildren(createFileTree(visible), 0);
+        sortVisibleItems(visible).forEach(function (item) {
+          renderFileRow(item);
+        });
 
         renderSummary();
         updateButtons();
