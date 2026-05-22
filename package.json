@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.89",
+  "version": "0.1.90",
   "publisher": "danyang",
   "repository": {
     "type": "git",
@@ -20,11 +20,17 @@
     "onCommand:cursorToolWindow.open",
     "onCommand:cursorToolWindow.checkForUpdates",
     "onCommand:cursorToolWindow.installUpdate",
+    "onCommand:cursorToolWindow.vcsUpdateDirectory",
+    "onCommand:cursorToolWindow.vcsCommitDirectory",
+    "onCommand:cursorToolWindow.vcsDiffFile",
+    "onCommand:cursorToolWindow.p4Sync",
+    "onCommand:cursorToolWindow.p4SubmitDirectory",
     "onCommand:cursorToolWindow.svnUpdate",
     "onCommand:cursorToolWindow.svnAdd",
     "onCommand:cursorToolWindow.svnRevert",
     "onCommand:cursorToolWindow.svnDiffBase",
     "onCommand:cursorToolWindow.svnFileHistory",
+    "onCommand:cursorToolWindow.svnCommitDirectory",
     "onView:cursorToolWindow.sidebar"
   ],
   "contributes": {
@@ -116,6 +122,16 @@
         "category": "Cursor Tools"
       },
       {
+        "command": "cursorToolWindow.p4Sync",
+        "title": "P4 Sync",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.p4SubmitDirectory",
+        "title": "P4 Submit Directory",
+        "category": "Cursor Tools"
+      },
+      {
         "command": "cursorToolWindow.svnUpdate",
         "title": "SVN Update",
         "category": "Cursor Tools"
@@ -138,6 +154,26 @@
       {
         "command": "cursorToolWindow.svnFileHistory",
         "title": "SVN File History",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnCommitDirectory",
+        "title": "SVN Commit Directory",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.vcsUpdateDirectory",
+        "title": "VCS Update Directory",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.vcsCommitDirectory",
+        "title": "VCS Commit Directory",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.vcsDiffFile",
+        "title": "VCS Diff File Before Commit",
         "category": "Cursor Tools"
       },
       {
@@ -180,39 +216,53 @@
           "group": "navigation@1"
         },
         {
+          "command": "cursorToolWindow.vcsDiffFile",
+          "when": "cursorToolWindow.vcs.showAny",
+          "group": "2_vcs@0"
+        },
+        {
           "command": "cursorToolWindow.p4Edit",
+          "when": "cursorToolWindow.vcs.showP4",
           "group": "3_p4@0"
         },
         {
           "command": "cursorToolWindow.p4DiffDepot",
+          "when": "cursorToolWindow.vcs.showP4",
           "group": "3_p4@1"
         },
         {
           "command": "cursorToolWindow.p4FileHistory",
+          "when": "cursorToolWindow.vcs.showP4",
           "group": "3_p4@2"
         },
         {
           "command": "cursorToolWindow.p4Revert",
+          "when": "cursorToolWindow.vcs.showP4",
           "group": "3_p4@3"
         },
         {
           "command": "cursorToolWindow.svnUpdate",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@0"
         },
         {
           "command": "cursorToolWindow.svnAdd",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@1"
         },
         {
           "command": "cursorToolWindow.svnDiffBase",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@2"
         },
         {
           "command": "cursorToolWindow.svnFileHistory",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@3"
         },
         {
           "command": "cursorToolWindow.svnRevert",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@4"
         }
       ],
@@ -232,48 +282,79 @@
           "group": "navigation@1"
         },
         {
+          "command": "cursorToolWindow.vcsUpdateDirectory",
+          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showAny",
+          "group": "2_vcs@0"
+        },
+        {
+          "command": "cursorToolWindow.vcsCommitDirectory",
+          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showAny",
+          "group": "2_vcs@1"
+        },
+        {
+          "command": "cursorToolWindow.vcsDiffFile",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showAny",
+          "group": "2_vcs@2"
+        },
+        {
           "command": "cursorToolWindow.p4Edit",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showP4",
           "group": "3_p4@0"
         },
         {
           "command": "cursorToolWindow.p4DiffDepot",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showP4",
           "group": "3_p4@1"
         },
         {
           "command": "cursorToolWindow.p4FileHistory",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showP4",
           "group": "3_p4@2"
         },
         {
           "command": "cursorToolWindow.p4Revert",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showP4",
           "group": "3_p4@3"
         },
         {
+          "command": "cursorToolWindow.p4Sync",
+          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showP4",
+          "group": "3_p4@4"
+        },
+        {
+          "command": "cursorToolWindow.p4SubmitDirectory",
+          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showP4",
+          "group": "3_p4@5"
+        },
+        {
           "command": "cursorToolWindow.svnUpdate",
+          "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@0"
         },
         {
           "command": "cursorToolWindow.svnAdd",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showSvn",
           "group": "4_svn@1"
         },
         {
           "command": "cursorToolWindow.svnDiffBase",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showSvn",
           "group": "4_svn@2"
         },
         {
           "command": "cursorToolWindow.svnFileHistory",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showSvn",
           "group": "4_svn@3"
         },
         {
           "command": "cursorToolWindow.svnRevert",
-          "when": "explorerResourceIsFolder == false",
+          "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showSvn",
           "group": "4_svn@4"
+        },
+        {
+          "command": "cursorToolWindow.svnCommitDirectory",
+          "when": "explorerResourceIsFolder == true && cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@5"
         }
       ],
       "view/title": [
@@ -417,6 +498,18 @@
             "minimum": 0,
             "maximum": 20,
             "description": "Font size for the TODO panel (0 uses the global setting)."
+          },
+          "cursorToolWindow.vcs.provider": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "p4",
+              "svn",
+              "both",
+              "none"
+            ],
+            "default": "auto",
+            "description": "Version-control provider shown in Cursor Tools and used by generic VCS commands."
           },
           "cursorToolWindow.p4.autoCheckoutOnEdit": {
             "type": "boolean",

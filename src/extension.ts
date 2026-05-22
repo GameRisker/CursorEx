@@ -100,6 +100,14 @@ interface SvnSnapshot {
 }
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
+type VcsProviderMode = 'auto' | 'p4' | 'svn' | 'both' | 'none';
+type ActiveVcsProvider = 'p4' | 'svn';
+
+interface VcsVisibility {
+  provider: VcsProviderMode;
+  showP4: boolean;
+  showSvn: boolean;
+}
 
 interface UpdateStatusPayload {
   currentVersion: string;
@@ -236,6 +244,13 @@ async function httpsGetJson<T>(url: string): Promise<T> {
 function toSafeFileName(name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
   return safe || `cursor-tool-window-${Date.now()}.vsix`;
+}
+
+function normalizeVcsProviderMode(value: unknown): VcsProviderMode {
+  if (value === 'p4' || value === 'svn' || value === 'both' || value === 'none') {
+    return value;
+  }
+  return 'auto';
 }
 
 function postUpdateStatusToSettings(status: UpdateStatusPayload): void {
@@ -768,6 +783,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         case 'refreshP4':
           void this.refreshP4Snapshot();
           break;
+        case 'p4SyncDirectory':
+          void this.p4Sync();
+          break;
+        case 'p4SubmitDirectory':
+          void this.p4SubmitDirectory();
+          break;
         case 'p4EditCurrent':
           void this.p4EditCurrentFile();
           break;
@@ -788,6 +809,9 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'svnUpdate':
           void this.svnUpdateWorkingCopy();
+          break;
+        case 'svnCommitDirectory':
+          void this.svnCommitDirectory();
           break;
         case 'svnAddCurrent':
           void this.svnAddCurrentFile();
@@ -971,6 +995,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     const config = vscode.workspace.getConfiguration('cursorToolWindow');
+    const vcsVisibility = this.getVcsVisibility();
     this.view.webview.postMessage({
       type: 'globalSettings',
       fontSize: config.get<number>('global.fontSize', 13),
@@ -986,11 +1011,15 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       pinexHoverColor: config.get<string>('pinex.hoverColor', 'rgba(14,99,156,0.45)'),
       todoFontSize: config.get<number>('todo.fontSize', 0),
       commentFontSize: config.get<number>('comment.fontSize', 0),
-      pinexFontSize: config.get<number>('pinex.fontSize', 0)
+      pinexFontSize: config.get<number>('pinex.fontSize', 0),
+      vcsProvider: vcsVisibility.provider,
+      showP4: vcsVisibility.showP4,
+      showSvn: vcsVisibility.showSvn
     });
   }
 
   refreshGlobalSettings(): void {
+    this.updateVcsContexts();
     this.postGlobalSettings();
   }
 
@@ -1209,6 +1238,126 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return status || 'changed';
   }
 
+  private getConfiguredVcsProvider(): VcsProviderMode {
+    const config = vscode.workspace.getConfiguration('cursorToolWindow');
+    return normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'));
+  }
+
+  private getVcsVisibility(): VcsVisibility {
+    const provider = this.getConfiguredVcsProvider();
+    if (provider === 'none') {
+      return { provider, showP4: false, showSvn: false };
+    }
+    if (provider === 'p4') {
+      return { provider, showP4: true, showSvn: false };
+    }
+    if (provider === 'svn') {
+      return { provider, showP4: false, showSvn: true };
+    }
+    if (provider === 'both') {
+      return { provider, showP4: true, showSvn: true };
+    }
+    return {
+      provider,
+      showP4: !!this.p4Snapshot.available,
+      showSvn: !!this.svnSnapshot.available
+    };
+  }
+
+  updateVcsContexts(): void {
+    const visibility = this.getVcsVisibility();
+    void vscode.commands.executeCommand('setContext', 'cursorToolWindow.vcs.showP4', visibility.showP4);
+    void vscode.commands.executeCommand('setContext', 'cursorToolWindow.vcs.showSvn', visibility.showSvn);
+    void vscode.commands.executeCommand('setContext', 'cursorToolWindow.vcs.showAny', visibility.showP4 || visibility.showSvn);
+  }
+
+  private async pickActiveVcsProvider(action: string): Promise<ActiveVcsProvider | undefined> {
+    const provider = this.getConfiguredVcsProvider();
+    if (provider === 'none') {
+      vscode.window.showWarningMessage('VCS is disabled in Cursor Tools settings.');
+      return undefined;
+    }
+    if (provider === 'p4' || provider === 'svn') {
+      return provider;
+    }
+
+    const p4Available = !!this.p4Snapshot.available;
+    const svnAvailable = !!this.svnSnapshot.available;
+    if (provider === 'auto') {
+      if (p4Available && !svnAvailable) return 'p4';
+      if (svnAvailable && !p4Available) return 'svn';
+      if (!p4Available && !svnAvailable) {
+        vscode.window.showWarningMessage(`No available VCS provider for ${action}.`);
+        return undefined;
+      }
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: 'P4', provider: 'p4' as ActiveVcsProvider },
+        { label: 'SVN', provider: 'svn' as ActiveVcsProvider }
+      ],
+      {
+        placeHolder: `Select VCS provider for ${action}`
+      }
+    );
+    return picked?.provider;
+  }
+
+  private async resolveTargetUri(resource?: any): Promise<vscode.Uri | null> {
+    if (resource instanceof vscode.Uri && resource.scheme === 'file') {
+      return resource;
+    }
+    if (resource && resource.resourceUri instanceof vscode.Uri && resource.resourceUri.scheme === 'file') {
+      return resource.resourceUri;
+    }
+    const editorUri = vscode.window.activeTextEditor?.document?.uri;
+    return editorUri && editorUri.scheme === 'file' ? editorUri : null;
+  }
+
+  private async resolveTargetDirectoryUri(resource?: any): Promise<vscode.Uri | null> {
+    const uri = await this.resolveTargetUri(resource);
+    if (uri) {
+      try {
+        const stat = await fs.stat(uri.fsPath);
+        if (stat.isDirectory()) {
+          return uri;
+        }
+      } catch {
+        // fall through to active/workspace directory
+      }
+    }
+
+    const editorUri = vscode.window.activeTextEditor?.document?.uri;
+    if (editorUri && editorUri.scheme === 'file') {
+      return vscode.Uri.file(path.dirname(editorUri.fsPath));
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.uri || null;
+  }
+
+  private async getP4TargetSpec(uri: vscode.Uri): Promise<string> {
+    try {
+      const stat = await fs.stat(uri.fsPath);
+      if (stat.isDirectory()) {
+        return path.join(uri.fsPath, '...');
+      }
+    } catch {
+      // use the raw path below
+    }
+    return uri.fsPath;
+  }
+
+  private async promptCommitMessage(provider: string, targetUri: vscode.Uri): Promise<string | undefined> {
+    return vscode.window.showInputBox({
+      title: `${provider}: Commit Directory`,
+      prompt: `Commit ${vscode.workspace.asRelativePath(targetUri, false) || targetUri.fsPath}`,
+      placeHolder: 'Commit message',
+      ignoreFocusOut: true,
+      validateInput: value => value.trim() ? undefined : 'Commit message is required.'
+    });
+  }
+
   private async tryLaunchP4Vc(args: string[], cwd?: string): Promise<boolean> {
     const candidates = ['p4vc', 'p4vc.bat'];
     for (const candidate of candidates) {
@@ -1311,6 +1460,8 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         updatedAt: Date.now()
       };
     }
+    this.updateVcsContexts();
+    this.postGlobalSettings();
     this.postP4Snapshot();
   }
 
@@ -1350,6 +1501,8 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         updatedAt: Date.now()
       };
     }
+    this.updateVcsContexts();
+    this.postGlobalSettings();
     this.postSvnSnapshot();
   }
 
@@ -1455,6 +1608,21 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
+  async svnCommitDirectory(resource?: any): Promise<void> {
+    const uri = await this.resolveTargetDirectoryUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('SVN: no local directory selected.');
+      return;
+    }
+    const message = await this.promptCommitMessage('SVN', uri);
+    if (!message) {
+      return;
+    }
+    const output = await this.runSvn(['commit', uri.fsPath, '-m', message], this.getSvnWorkingDirectory());
+    await this.refreshSvnSnapshot();
+    vscode.window.showInformationMessage(output || `SVN: committed ${vscode.workspace.asRelativePath(uri, false) || uri.fsPath}.`);
+  }
+
   private async openSvnLocalFile(filePath: string): Promise<void> {
     try {
       const uri = vscode.Uri.file(filePath);
@@ -1464,6 +1632,62 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       this.schedulePostOpenFiles();
     } catch {
       vscode.window.showWarningMessage(`SVN: unable to open file: ${filePath}`);
+    }
+  }
+
+  async p4Sync(resource?: any): Promise<void> {
+    const uri = resource ? await this.resolveTargetUri(resource) : await this.resolveTargetDirectoryUri();
+    const target = uri ? await this.getP4TargetSpec(uri) : path.join(this.getP4WorkingDirectory(), '...');
+    const output = await this.runP4(['sync', target], this.getP4WorkingDirectory());
+    await this.refreshP4Snapshot();
+    vscode.window.showInformationMessage(output || 'P4: sync complete.');
+  }
+
+  async p4SubmitDirectory(resource?: any): Promise<void> {
+    const uri = await this.resolveTargetDirectoryUri(resource);
+    if (!uri) {
+      vscode.window.showWarningMessage('P4: no local directory selected.');
+      return;
+    }
+    const message = await this.promptCommitMessage('P4', uri);
+    if (!message) {
+      return;
+    }
+    const target = await this.getP4TargetSpec(uri);
+    const output = await this.runP4(['submit', '-d', message, target], this.getP4WorkingDirectory());
+    await this.refreshP4Snapshot();
+    vscode.window.showInformationMessage(output || `P4: submitted ${vscode.workspace.asRelativePath(uri, false) || uri.fsPath}.`);
+  }
+
+  async vcsUpdateDirectory(resource?: any): Promise<void> {
+    const provider = await this.pickActiveVcsProvider('directory update');
+    const target = await this.resolveTargetDirectoryUri(resource);
+    if (!target) {
+      vscode.window.showWarningMessage('VCS: no local directory selected.');
+      return;
+    }
+    if (provider === 'p4') {
+      await this.p4Sync(target);
+    } else if (provider === 'svn') {
+      await this.svnUpdate(target);
+    }
+  }
+
+  async vcsCommitDirectory(resource?: any): Promise<void> {
+    const provider = await this.pickActiveVcsProvider('directory commit');
+    if (provider === 'p4') {
+      await this.p4SubmitDirectory(resource);
+    } else if (provider === 'svn') {
+      await this.svnCommitDirectory(resource);
+    }
+  }
+
+  async vcsDiffFile(resource?: any): Promise<void> {
+    const provider = await this.pickActiveVcsProvider('file diff');
+    if (provider === 'p4') {
+      await this.p4DiffDepotFile(resource);
+    } else if (provider === 'svn') {
+      await this.svnDiffBaseFile(resource);
     }
   }
 
@@ -2876,9 +3100,15 @@ export function activate(context: vscode.ExtensionContext) {
   commentManager.onDidChange(() => provider.postComments());
   commentManager.onDidActiveLineComment(p => provider.highlightActiveComment(p));
   pinExManager.onDidChange(() => provider.postPinEx());
+  provider.updateVcsContexts();
   void provider.refreshP4Snapshot();
   void provider.refreshSvnSnapshot();
   context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('cursorToolWindow.vcs')) {
+        provider.refreshGlobalSettings();
+      }
+    }),
     vscode.workspace.onDidChangeTextDocument(() => {
       provider.clearReferenceQueryCache();
     }),
@@ -3155,6 +3385,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('cursorToolWindow.p4FileHistory', async (resource?: any) => {
       await provider.p4FileHistory(resource);
     }),
+    vscode.commands.registerCommand('cursorToolWindow.p4Sync', async (resource?: any) => {
+      await provider.p4Sync(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.p4SubmitDirectory', async (resource?: any) => {
+      await provider.p4SubmitDirectory(resource);
+    }),
     vscode.commands.registerCommand('cursorToolWindow.svnUpdate', async (resource?: any) => {
       await provider.svnUpdate(resource);
     }),
@@ -3169,6 +3405,18 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('cursorToolWindow.svnFileHistory', async (resource?: any) => {
       await provider.svnFileHistory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.svnCommitDirectory', async (resource?: any) => {
+      await provider.svnCommitDirectory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.vcsUpdateDirectory', async (resource?: any) => {
+      await provider.vcsUpdateDirectory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.vcsCommitDirectory', async (resource?: any) => {
+      await provider.vcsCommitDirectory(resource);
+    }),
+    vscode.commands.registerCommand('cursorToolWindow.vcsDiffFile', async (resource?: any) => {
+      await provider.vcsDiffFile(resource);
     }),
     vscode.commands.registerCommand('cursorToolWindow.openKeyboardShortcuts', async () => {
       // 打开快捷键设置页面
@@ -6357,6 +6605,8 @@ function getWebviewContent(version: string): string {
           <div class="pinex-tab-content" id="pinex-p4-content">
             <div class="pinex-inline-toolbar">
               <button class="pinex-toolbar-icon" id="p4-refresh-btn-inline" title="Refresh P4">&#8635;</button>
+              <button class="pinex-toolbar-icon" id="p4-sync-dir-btn-inline" title="Sync current directory">Sync</button>
+              <button class="pinex-toolbar-icon" id="p4-submit-dir-btn-inline" title="Submit current directory">Submit</button>
               <button class="pinex-toolbar-icon" id="p4-edit-current-btn-inline" title="Open current file for edit">Edit</button>
               <button class="pinex-toolbar-icon" id="p4-diff-current-btn-inline" title="Diff current file">Diff</button>
               <button class="pinex-toolbar-icon" id="p4-revert-current-btn-inline" title="Revert current file">Revert</button>
@@ -6367,6 +6617,7 @@ function getWebviewContent(version: string): string {
             <div class="pinex-inline-toolbar">
               <button class="pinex-toolbar-icon" id="svn-refresh-btn-inline" title="Refresh SVN">&#8635;</button>
               <button class="pinex-toolbar-icon" id="svn-update-btn-inline" title="Update working copy">Update</button>
+              <button class="pinex-toolbar-icon" id="svn-commit-dir-btn-inline" title="Commit current directory">Commit</button>
               <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
               <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
               <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
@@ -6585,6 +6836,9 @@ function getWebviewContent(version: string): string {
       var refsVisibleCountBySession = {};
       var p4Snapshot = { available: false, status: 'Loading P4...', clientName: '', clientRoot: '', opened: [], pendingChanges: [], updatedAt: 0 };
       var svnSnapshot = { available: false, status: 'Loading SVN...', workingCopyRoot: '', url: '', revision: '', items: [], updatedAt: 0 };
+      var vcsProvider = 'auto';
+      var showP4Tab = true;
+      var showSvnTab = true;
 
       setPinExBootStatus('boot: state vars ready');
 
@@ -6764,6 +7018,39 @@ function getWebviewContent(version: string): string {
 
       function debugPinExTabs(message) {
         return;
+      }
+
+      function isPinExTabVisible(tabName) {
+        if (tabName === 'p4') return showP4Tab;
+        if (tabName === 'svn') return showSvnTab;
+        return true;
+      }
+
+      function firstVisiblePinExTab() {
+        for (var i = 0; i < defaultPinExTabOrder.length; i++) {
+          if (isPinExTabVisible(defaultPinExTabOrder[i])) {
+            return defaultPinExTabOrder[i];
+          }
+        }
+        return 'todo';
+      }
+
+      function applyVcsVisibility() {
+        var p4Tab = pinExTabBar ? pinExTabBar.querySelector('.pinex-tab[data-tab="p4"]') : null;
+        var svnTab = pinExTabBar ? pinExTabBar.querySelector('.pinex-tab[data-tab="svn"]') : null;
+        var p4Content = document.getElementById('pinex-p4-content');
+        var svnContent = document.getElementById('pinex-svn-content');
+
+        if (p4Tab) p4Tab.style.display = showP4Tab ? '' : 'none';
+        if (svnTab) svnTab.style.display = showSvnTab ? '' : 'none';
+        if (p4Content && !showP4Tab) p4Content.classList.remove('active');
+        if (svnContent && !showSvnTab) svnContent.classList.remove('active');
+
+        if (!isPinExTabVisible(pinExActiveTab)) {
+          switchPinExTab(firstVisiblePinExTab());
+        } else if (typeof window.__updatePinExTabLayout === 'function') {
+          window.__updatePinExTabLayout();
+        }
       }
 
       function applyPinExTabOrder() {
@@ -7113,6 +7400,16 @@ function getWebviewContent(version: string): string {
           } else {
             document.documentElement.style.setProperty('--pinex-font-size', 'var(--font-size-base)');
           }
+          if (typeof message.vcsProvider === 'string') {
+            vcsProvider = message.vcsProvider;
+          }
+          if (typeof message.showP4 === 'boolean') {
+            showP4Tab = message.showP4;
+          }
+          if (typeof message.showSvn === 'boolean') {
+            showSvnTab = message.showSvn;
+          }
+          applyVcsVisibility();
         } else if (message.type === 'activeFileChanged') {
           activePinExUri = message.uri || null;
           highlightActivePinEx();
@@ -7276,6 +7573,20 @@ function getWebviewContent(version: string): string {
           vscode.postMessage({ type: 'refreshP4' });
         });
       }
+      var p4SyncDirBtn = document.getElementById('p4-sync-dir-btn-inline');
+      if (p4SyncDirBtn) {
+        p4SyncDirBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'p4SyncDirectory' });
+        });
+      }
+      var p4SubmitDirBtn = document.getElementById('p4-submit-dir-btn-inline');
+      if (p4SubmitDirBtn) {
+        p4SubmitDirBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'p4SubmitDirectory' });
+        });
+      }
       var p4EditCurrentBtn = document.getElementById('p4-edit-current-btn-inline');
       if (p4EditCurrentBtn) {
         p4EditCurrentBtn.addEventListener('click', function (ev) {
@@ -7310,6 +7621,13 @@ function getWebviewContent(version: string): string {
         svnUpdateBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
           vscode.postMessage({ type: 'svnUpdate' });
+        });
+      }
+      var svnCommitDirBtn = document.getElementById('svn-commit-dir-btn-inline');
+      if (svnCommitDirBtn) {
+        svnCommitDirBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnCommitDirectory' });
         });
       }
       var svnAddCurrentBtn = document.getElementById('svn-add-current-btn-inline');
@@ -8848,6 +9166,9 @@ function getWebviewContent(version: string): string {
 
       // PinEx Tab 切換邏輯
       function switchPinExTab(tabName) {
+        if (!isPinExTabVisible(tabName)) {
+          tabName = firstVisiblePinExTab();
+        }
         console.log('[CursorEx-Webview] switchPinExTab:', tabName);
         debugPinExTabs('switchPinExTab -> ' + tabName);
         pinExActiveTab = tabName;
@@ -8927,6 +9248,7 @@ function getWebviewContent(version: string): string {
       }
       normalizePinExToolbarText();
       applyPinExTabOrder();
+      applyVcsVisibility();
 
       for (var td = 0; td < pinExTabs.length; td++) {
         pinExTabs[td].setAttribute('draggable', 'false');
@@ -9433,7 +9755,8 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             textColor: config.get('global.textColor', '#f3f3f3'),
             mutedColor: config.get('global.mutedColor', '#c5c5c5'),
             bgColor: config.get('global.bgColor', '#1e1e1e'),
-            borderColor: config.get('global.borderColor', '#2d2d2d')
+            borderColor: config.get('global.borderColor', '#2d2d2d'),
+            vcsProvider: normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'))
           },
           todo: {
             extensions: config.get('todo.extensions', ['cs', 'csx', 'js', 'jsx', 'ts', 'tsx', 'cpp', 'c', 'h', 'hpp', 'java', 'go']),
@@ -9492,7 +9815,8 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
             textColor: config.get('global.textColor', '#f3f3f3'),
             mutedColor: config.get('global.mutedColor', '#c5c5c5'),
             bgColor: config.get('global.bgColor', '#1e1e1e'),
-            borderColor: config.get('global.borderColor', '#2d2d2d')
+            borderColor: config.get('global.borderColor', '#2d2d2d'),
+            vcsProvider: normalizeVcsProviderMode(config.get<string>('vcs.provider', 'auto'))
           },
           todo: {
             extensions: profile.todoExtensions,
@@ -9567,6 +9891,9 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
           }
           if (typeof msg.global.borderColor === 'string') {
             await config.update('global.borderColor', msg.global.borderColor, vscode.ConfigurationTarget.Global);
+          }
+          if (typeof msg.global.vcsProvider === 'string') {
+            await config.update('vcs.provider', normalizeVcsProviderMode(msg.global.vcsProvider), vscode.ConfigurationTarget.Global);
           }
         }
         if (msg.todo) {
@@ -9906,6 +10233,17 @@ function getSettingsWebviewContent(): string {
         <input type="number" id="global-fontSize" min="10" max="20" value="13" style="width:80px;" /> px
       </div>
       <div class="form-group">
+        <label>Version control provider</label>
+        <div class="hint">Controls which version-control tabs and generic VCS commands are used.</div>
+        <select id="global-vcsProvider" style="width:220px;padding:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
+          <option value="auto">Auto detect</option>
+          <option value="p4">P4 only</option>
+          <option value="svn">SVN only</option>
+          <option value="both">Show both</option>
+          <option value="none">Hide version control</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>Accent color</label>
         <div class="hint">Used for highlight, hover, etc.</div>
         <input type="color" id="global-accentColor" value="#0e639c" style="width:60px;height:30px;" />
@@ -10220,6 +10558,7 @@ function getSettingsWebviewContent(): string {
             document.getElementById('global-mutedColor').value = msg.global.mutedColor || '#c5c5c5';
             document.getElementById('global-bgColor').value = msg.global.bgColor || '#1e1e1e';
             document.getElementById('global-borderColor').value = msg.global.borderColor || '#2d2d2d';
+            document.getElementById('global-vcsProvider').value = msg.global.vcsProvider || 'auto';
           }
           if (msg.todo) {
             document.getElementById('todo-extensions').value = (msg.todo.extensions || []).join(', ');
@@ -10370,6 +10709,7 @@ function getSettingsWebviewContent(): string {
         var globalMutedColor = document.getElementById('global-mutedColor').value || '#c5c5c5';
         var globalBgColor = document.getElementById('global-bgColor').value || '#1e1e1e';
         var globalBorderColor = document.getElementById('global-borderColor').value || '#2d2d2d';
+        var globalVcsProvider = document.getElementById('global-vcsProvider').value || 'auto';
 
         var todoHoverColor = document.getElementById('todo-hoverColor').value || 'rgba(14,99,156,0.45)';
         var todoFontSize = parseInt(document.getElementById('todo-fontSize').value, 10) || 0;
@@ -10410,7 +10750,8 @@ function getSettingsWebviewContent(): string {
             textColor: globalTextColor,
             mutedColor: globalMutedColor,
             bgColor: globalBgColor,
-            borderColor: globalBorderColor
+            borderColor: globalBorderColor,
+            vcsProvider: globalVcsProvider
           },
           todo: {
             extensions: extensions,
@@ -10472,6 +10813,7 @@ function getSettingsWebviewContent(): string {
         document.getElementById('global-mutedColor').value = '#c5c5c5';
         document.getElementById('global-bgColor').value = '#1e1e1e';
         document.getElementById('global-borderColor').value = '#2d2d2d';
+        document.getElementById('global-vcsProvider').value = 'auto';
         // TODO 设置
         document.getElementById('todo-extensions').value = 'cs, csx, js, jsx, ts, tsx, cpp, c, h, hpp, java, go';
         document.getElementById('todo-excludeGlobs').value = '**/node_modules/**' + String.fromCharCode(10) + '**/bin/**' + String.fromCharCode(10) + '**/obj/**';
