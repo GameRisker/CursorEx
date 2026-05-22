@@ -866,6 +866,31 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         case 'svnCommitDirectory':
           void this.svnCommitDirectory();
           break;
+        case 'svnUpdatePath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnUpdate(vscode.Uri.file(msg.path));
+          }
+          break;
+        case 'svnCommitPath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnCommitWorkbench(vscode.Uri.file(msg.path));
+          }
+          break;
+        case 'svnAddPath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnAddFile(vscode.Uri.file(msg.path));
+          }
+          break;
+        case 'svnRevertPath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnRevertFile(vscode.Uri.file(msg.path));
+          }
+          break;
+        case 'svnDiffPath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnDiffBaseFile(vscode.Uri.file(msg.path));
+          }
+          break;
         case 'svnAddCurrent':
           void this.svnAddCurrentFile();
           break;
@@ -6910,8 +6935,50 @@ function getWebviewContent(version: string): string {
       margin-left: 14px;
     }
     .p4-panel {
+      flex: 1;
       padding: 6px;
       min-height: 0;
+      overflow: auto;
+      color: var(--panel-text);
+    }
+    .vcs-context-menu {
+      position: fixed;
+      z-index: 9999;
+      min-width: 168px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--vscode-menu-background, #252526);
+      color: var(--vscode-menu-foreground, var(--panel-text));
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      display: none;
+    }
+    .vcs-context-menu.visible {
+      display: block;
+    }
+    .vcs-context-item {
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.85);
+    }
+    .vcs-context-item:hover {
+      background: var(--vscode-menu-selectionBackground, var(--pinex-hover));
+      color: var(--vscode-menu-selectionForeground, var(--fg));
+    }
+    .vcs-context-item.disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .vcs-context-item.disabled:hover {
+      background: transparent;
+      color: inherit;
+    }
+    .vcs-context-separator {
+      height: 1px;
+      margin: 4px 2px;
+      background: var(--border);
     }
     .pinex-dir-header.active {
       background-color: var(--pinex-active);
@@ -7168,6 +7235,7 @@ function getWebviewContent(version: string): string {
             </div>
             <div class="p4-panel scroll-area" id="svn-panel"></div>
           </div>
+          <div class="vcs-context-menu" id="svn-context-menu"></div>
           <div class="pinex-tab-content" id="pinex-symbol-content">
             <div class="symbol-panel">
               <div class="symbol-class-list scroll-area" id="symbol-class-list"></div>
@@ -7271,6 +7339,25 @@ function getWebviewContent(version: string): string {
         scrollAreas.forEach(function (el) { setAreaScrollbarVisible(el, false); });
       });
 
+      function hideSvnContextMenu() {
+        if (!svnContextMenuEl) return;
+        svnContextMenuEl.classList.remove('visible');
+        svnContextMenuEl.innerHTML = '';
+      }
+
+      document.addEventListener('click', function (ev) {
+        if (svnContextMenuEl && ev && svnContextMenuEl.contains(ev.target)) {
+          return;
+        }
+        hideSvnContextMenu();
+      }, true);
+
+      document.addEventListener('keydown', function (ev) {
+        if (ev && ev.key === 'Escape') {
+          hideSvnContextMenu();
+        }
+      }, true);
+
       var bodyRoot = document.getElementById('body-root');
       var todoListEl = document.getElementById('todo-list-inline') || document.getElementById('todo-list');
       var searchInput = document.getElementById('search-input-inline') || document.getElementById('search-input');
@@ -7284,6 +7371,7 @@ function getWebviewContent(version: string): string {
       var pinExOpenListEl = document.getElementById('pinex-open-list');
       var p4PanelEl = document.getElementById('p4-panel');
       var svnPanelEl = document.getElementById('svn-panel');
+      var svnContextMenuEl = document.getElementById('svn-context-menu');
       var refsSessionListEl = document.getElementById('refs-session-list');
       var refsResultListEl = document.getElementById('refs-result-list');
       var refsResizer = document.getElementById('refs-resizer');
@@ -8877,6 +8965,87 @@ function getWebviewContent(version: string): string {
           return { key: 'default', label: (raw || '?').slice(0, 2).toUpperCase(), text: raw || 'changed' };
         }
 
+        function getSvnRawStatus(item) {
+          return String((item && item.status) || '').trim();
+        }
+
+        function canSvnRevert(item) {
+          var raw = getSvnRawStatus(item);
+          return raw === 'M' || raw === 'A' || raw === 'D' || raw === 'R' || raw === 'C' || raw === '!';
+        }
+
+        function canSvnDiff(item, isDirectory) {
+          var raw = getSvnRawStatus(item);
+          return !!item && !isDirectory && raw !== 'X' && raw !== 'I';
+        }
+
+        function showSvnContextMenu(ev, target) {
+          if (!svnContextMenuEl || !target) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          hideSvnContextMenu();
+
+          var item = target.item || null;
+          var targetPath = target.path || (item && item.fsPath) || '';
+          var isDirectory = !!target.isDirectory;
+          var raw = getSvnRawStatus(item);
+
+          function menuItem(label, enabled, run) {
+            var row = document.createElement('div');
+            row.className = 'vcs-context-item' + (enabled ? '' : ' disabled');
+            row.textContent = label;
+            if (enabled) {
+              row.addEventListener('click', function (clickEv) {
+                clickEv.preventDefault();
+                clickEv.stopPropagation();
+                hideSvnContextMenu();
+                run();
+              });
+            }
+            svnContextMenuEl.appendChild(row);
+          }
+
+          function separator() {
+            var sep = document.createElement('div');
+            sep.className = 'vcs-context-separator';
+            svnContextMenuEl.appendChild(sep);
+          }
+
+          menuItem('Open', !!item && !isDirectory && !!item.fsPath, function () {
+            vscode.postMessage({ type: 'openSvnFile', path: item.fsPath });
+          });
+          menuItem('Diff', canSvnDiff(item, isDirectory), function () {
+            vscode.postMessage({ type: 'svnDiffPath', path: item.fsPath });
+          });
+          separator();
+          menuItem('Update', !!targetPath, function () {
+            vscode.postMessage({ type: 'svnUpdatePath', path: targetPath });
+          });
+          menuItem('Commit...', !!targetPath, function () {
+            vscode.postMessage({ type: 'svnCommitPath', path: targetPath });
+          });
+          separator();
+          menuItem('Add', !!item && raw === '?' && !!item.fsPath, function () {
+            vscode.postMessage({ type: 'svnAddPath', path: item.fsPath });
+          });
+          menuItem('Revert', !!item && canSvnRevert(item) && !!item.fsPath, function () {
+            vscode.postMessage({ type: 'svnRevertPath', path: item.fsPath });
+          });
+          separator();
+          menuItem('Refresh', true, function () {
+            vscode.postMessage({ type: 'refreshSvn' });
+          });
+
+          svnContextMenuEl.style.left = '0px';
+          svnContextMenuEl.style.top = '0px';
+          svnContextMenuEl.classList.add('visible');
+          var rect = svnContextMenuEl.getBoundingClientRect();
+          var x = Math.min(ev.clientX, Math.max(0, window.innerWidth - rect.width - 4));
+          var y = Math.min(ev.clientY, Math.max(0, window.innerHeight - rect.height - 4));
+          svnContextMenuEl.style.left = x + 'px';
+          svnContextMenuEl.style.top = y + 'px';
+        }
+
         var summary = document.createElement('div');
         summary.className = 'refs-toolbar';
 
@@ -8925,20 +9094,27 @@ function getWebviewContent(version: string): string {
         }
 
         function createSvnTree(items) {
-          var root = { name: '', key: '', dirs: {}, files: [], count: 0, item: null };
+          var root = { name: '', key: '', fsPath: '', dirs: {}, files: [], count: 0, item: null };
           (items || []).forEach(function (item) {
             var normalized = getSvnItemPath(item);
             var parts = normalized.split('/').filter(Boolean);
             if (!parts.length) {
               parts = [normalized || 'unknown'];
             }
+            var allParts = parts.slice();
+            var itemFsParts = String((item && item.fsPath) || '').replace(/\\\\/g, '/').split('/').filter(Boolean);
             var fileName = parts.pop();
             var node = root;
             var prefix = '';
-            parts.forEach(function (part) {
+            parts.forEach(function (part, index) {
               prefix = prefix ? prefix + '/' + part : part;
               if (!node.dirs[part]) {
-                node.dirs[part] = { name: part, key: prefix, dirs: {}, files: [], count: 0, item: null };
+                node.dirs[part] = { name: part, key: prefix, fsPath: '', dirs: {}, files: [], count: 0, item: null };
+              }
+              if (!node.dirs[part].fsPath && itemFsParts.length >= allParts.length) {
+                var fsPrefixLength = itemFsParts.length - (allParts.length - index - 1);
+                var prefixParts = itemFsParts.slice(0, Math.max(0, fsPrefixLength));
+                node.dirs[part].fsPath = (item.fsPath && item.fsPath.charAt(0) === '/' ? '/' : '') + prefixParts.join('/');
               }
               node = node.dirs[part];
               node.count += 1;
@@ -8996,6 +9172,13 @@ function getWebviewContent(version: string): string {
               vscode.postMessage({ type: 'openSvnFile', path: item.fsPath });
             });
           }
+          row.addEventListener('contextmenu', function (ev) {
+            showSvnContextMenu(ev, {
+              item: item,
+              path: item.fsPath,
+              isDirectory: false
+            });
+          });
 
           parent.appendChild(row);
         }
@@ -9047,6 +9230,13 @@ function getWebviewContent(version: string): string {
               vscode.postMessage({ type: 'openSvnFile', path: node.item.fsPath });
             });
           }
+          row.addEventListener('contextmenu', function (ev) {
+            showSvnContextMenu(ev, {
+              item: node.item,
+              path: node.fsPath || (node.item && node.item.fsPath) || '',
+              isDirectory: true
+            });
+          });
 
           dirWrap.appendChild(row);
           if (expanded) {
