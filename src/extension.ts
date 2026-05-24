@@ -128,6 +128,13 @@ interface SvnCommitWorkbenchSnapshot {
   updatedAt: number;
 }
 
+interface SvnTargetInfo {
+  workingCopyRoot: string;
+  url: string;
+  revision: string;
+  statusTarget: string;
+}
+
 type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
 type VcsProviderMode = 'auto' | 'p4' | 'svn' | 'both' | 'none';
 type ActiveVcsProvider = 'p4' | 'svn';
@@ -927,6 +934,11 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
             void this.openSvnLocalFile(msg.path);
           }
           break;
+        case 'svnRevealInOS':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.openSvnPathInSystemFolder(msg.path);
+          }
+          break;
         case 'revealPinEx':
           if (msg.uri) {
             revealPinExFile(vscode.Uri.parse(msg.uri));
@@ -1293,7 +1305,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     const result = await execFileAsync('svn', args, {
       cwd: cwd || this.getSvnWorkingDirectory(),
       windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024
+      maxBuffer: 32 * 1024 * 1024
     });
     return `${result.stdout || ''}${result.stderr || ''}`.trim();
   }
@@ -1317,16 +1329,58 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return folder?.uri || null;
   }
 
-  private async getSvnInfoForTarget(targetPath: string): Promise<{ workingCopyRoot: string; url: string; revision: string }> {
-    const infoText = await this.runSvn(['info', targetPath], path.dirname(targetPath));
+  private parseSvnInfoText(infoText: string, fallbackRoot: string): Omit<SvnTargetInfo, 'statusTarget'> {
     const workingCopyRoot = (infoText.match(/^Working Copy Root Path:\s*(.+)$/m)?.[1] || '').trim();
     const url = (infoText.match(/^URL:\s*(.+)$/m)?.[1] || '').trim();
     const revision = (infoText.match(/^Revision:\s*(.+)$/m)?.[1] || '').trim();
     return {
-      workingCopyRoot: workingCopyRoot || targetPath,
+      workingCopyRoot: workingCopyRoot || fallbackRoot,
       url,
       revision
     };
+  }
+
+  private isPathInside(parentPath: string, childPath: string): boolean {
+    const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+  }
+
+  private async getSvnInfoForTarget(targetPath: string): Promise<SvnTargetInfo> {
+    const candidates: string[] = [];
+    const addCandidate = (candidate: string) => {
+      if (!candidate || candidates.includes(candidate)) {
+        return;
+      }
+      candidates.push(candidate);
+    };
+
+    addCandidate(targetPath);
+    const stat = await fs.stat(targetPath).catch(() => null);
+    let current = stat?.isDirectory() ? targetPath : path.dirname(targetPath);
+    const rootPath = path.parse(current).root;
+    while (current) {
+      addCandidate(current);
+      if (current === rootPath) {
+        break;
+      }
+      current = path.dirname(current);
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const infoText = await this.runSvn(['info', candidate], path.dirname(candidate) || candidate);
+        const info = this.parseSvnInfoText(infoText, candidate);
+        const statusTarget = this.isPathInside(info.workingCopyRoot, targetPath) ? targetPath : candidate;
+        return {
+          ...info,
+          statusTarget
+        };
+      } catch {
+        // Keep walking upward. Unversioned files fail `svn info`, but their parent working copy can still be scanned.
+      }
+    }
+
+    throw new Error(`SVN working copy not found for ${targetPath}.`);
   }
 
   private createSvnCommitFileItem(
@@ -1473,11 +1527,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   private async buildSvnCommitSnapshot(targetUri: vscode.Uri): Promise<SvnCommitWorkbenchSnapshot> {
     const info = await this.getSvnInfoForTarget(targetUri.fsPath);
     const root = info.workingCopyRoot || targetUri.fsPath;
-    const statusXml = await this.runSvn(['status', '--xml', targetUri.fsPath], root);
+    const statusXml = await this.runSvn(['status', '--xml', info.statusTarget], root);
     const items = this.parseSvnCommitStatusXml(statusXml, root);
-    const targetLabel = vscode.workspace.asRelativePath(targetUri, false) || targetUri.fsPath;
+    const targetUriForLabel = vscode.Uri.file(info.statusTarget);
+    const targetLabel = vscode.workspace.asRelativePath(targetUriForLabel, false) || info.statusTarget;
     return {
-      targetPath: targetUri.fsPath,
+      targetPath: info.statusTarget,
       targetLabel,
       workingCopyRoot: root,
       url: info.url,
@@ -2179,6 +2234,16 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       this.schedulePostOpenFiles();
     } catch {
       vscode.window.showWarningMessage(`SVN: unable to open file: ${filePath}`);
+    }
+  }
+
+  private async openSvnPathInSystemFolder(targetPath: string): Promise<void> {
+    try {
+      const stat = await fs.stat(targetPath).catch(() => null);
+      const folderPath = stat?.isDirectory() ? targetPath : path.dirname(targetPath);
+      await vscode.env.openExternal(vscode.Uri.file(folderPath));
+    } catch {
+      vscode.window.showWarningMessage(`SVN: unable to open system folder: ${targetPath}`);
     }
   }
 
@@ -7095,10 +7160,15 @@ function getWebviewContent(version: string): string {
       font-size: calc(var(--font-size-base) * 0.85);
       cursor: pointer;
     }
-    .pinex-toolbar-icon:hover {
-      border-color: var(--accent);
-      color: var(--fg);
-    }
+	    .pinex-toolbar-icon:hover {
+	      border-color: var(--accent);
+	      color: var(--fg);
+	    }
+	    .pinex-toolbar-icon.active {
+	      border-color: var(--accent);
+	      background: rgba(14,99,156,0.24);
+	      color: var(--fg);
+	    }
     .card-resizer {
       position: absolute;
       left: 2px;
@@ -7255,6 +7325,7 @@ function getWebviewContent(version: string): string {
               <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
               <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
               <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
+              <button class="pinex-toolbar-icon" id="svn-toggle-unversioned-btn-inline" title="Hide unversioned files">?</button>
             </div>
             <div class="p4-panel scroll-area" id="svn-panel"></div>
           </div>
@@ -7395,6 +7466,7 @@ function getWebviewContent(version: string): string {
       var p4PanelEl = document.getElementById('p4-panel');
       var svnPanelEl = document.getElementById('svn-panel');
       var svnContextMenuEl = document.getElementById('svn-context-menu');
+      var svnToggleUnversionedBtn = document.getElementById('svn-toggle-unversioned-btn-inline');
       var refsSessionListEl = document.getElementById('refs-session-list');
       var refsResultListEl = document.getElementById('refs-result-list');
       var refsResizer = document.getElementById('refs-resizer');
@@ -7494,6 +7566,7 @@ function getWebviewContent(version: string): string {
       var vcsProvider = 'auto';
       var showP4Tab = true;
       var showSvnTab = true;
+      var showSvnUnversioned = true;
 
       setPinExBootStatus('boot: state vars ready');
 
@@ -7552,9 +7625,12 @@ function getWebviewContent(version: string): string {
       if (typeof state.noteHeight === 'number') {
             cardHeights.note = state.noteHeight;
       }
-      if (typeof state.showFiles === 'boolean') {
-        showFiles = state.showFiles;
-      }
+	      if (typeof state.showFiles === 'boolean') {
+	        showFiles = state.showFiles;
+	      }
+	      if (typeof state.showSvnUnversioned === 'boolean') {
+	        showSvnUnversioned = state.showSvnUnversioned;
+	      }
       if (typeof state.refsSessionHeight === 'number') {
         refsSessionHeight = state.refsSessionHeight;
       }
@@ -7605,9 +7681,10 @@ function getWebviewContent(version: string): string {
         cardCollapsed = {};
         cardHeights = {};
         cardOrder = cardIds.slice();
-        showFiles = true;
-        symbolMemberFilters = { field: true, property: true, method: true };
-      }
+	        showFiles = true;
+	        showSvnUnversioned = true;
+	        symbolMemberFilters = { field: true, property: true, method: true };
+	      }
 
       setPinExBootStatus('boot: state restored');
 
@@ -7631,9 +7708,10 @@ function getWebviewContent(version: string): string {
           cardCollapsed: cardCollapsed,
           cardHeights: cardHeights,
           cardOrder: cardOrder,
-          pinExTabOrder: pinExTabOrder,
-          showFiles: showFiles,
-          symbolMemberFilters: symbolMemberFilters,
+	          pinExTabOrder: pinExTabOrder,
+	          showFiles: showFiles,
+	          showSvnUnversioned: showSvnUnversioned,
+	          symbolMemberFilters: symbolMemberFilters,
           refsSessionHeight: refsSessionHeight,
           activeReferenceSessionId: activeReferenceSessionId,
           refsAccessFilter: refsAccessFilter,
@@ -7669,6 +7747,13 @@ function getWebviewContent(version: string): string {
         if (pinExExpandAllBtn) pinExExpandAllBtn.textContent = '+';
         if (pinExCollapseAllBtn) pinExCollapseAllBtn.textContent = '-';
         if (pinExLocateBtn) pinExLocateBtn.textContent = 'o';
+      }
+
+      function syncSvnUnversionedToggle() {
+        if (!svnToggleUnversionedBtn) return;
+        svnToggleUnversionedBtn.classList.toggle('active', showSvnUnversioned);
+        svnToggleUnversionedBtn.textContent = showSvnUnversioned ? '?' : '-?';
+        svnToggleUnversionedBtn.title = showSvnUnversioned ? 'Hide unversioned files' : 'Show unversioned files';
       }
 
       function debugPinExTabs(message) {
@@ -8304,6 +8389,16 @@ function getWebviewContent(version: string): string {
         svnRevertCurrentBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
           vscode.postMessage({ type: 'svnRevertCurrent' });
+        });
+      }
+      if (svnToggleUnversionedBtn) {
+        syncSvnUnversionedToggle();
+        svnToggleUnversionedBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          showSvnUnversioned = !showSvnUnversioned;
+          syncSvnUnversionedToggle();
+          persistState();
+          renderSvn();
         });
       }
 
@@ -8972,6 +9067,7 @@ function getWebviewContent(version: string): string {
       function renderSvn() {
         if (!svnPanelEl) return;
         svnPanelEl.innerHTML = '';
+        syncSvnUnversionedToggle();
 
         function getSvnActionInfo(item) {
           var raw = String((item && item.status) || '').trim();
@@ -9034,12 +9130,15 @@ function getWebviewContent(version: string): string {
             svnContextMenuEl.appendChild(sep);
           }
 
-          menuItem('Open', !!item && !isDirectory && !!item.fsPath, function () {
-            vscode.postMessage({ type: 'openSvnFile', path: item.fsPath });
-          });
-          menuItem('Diff', canSvnDiff(item, isDirectory), function () {
-            vscode.postMessage({ type: 'svnDiffPath', path: item.fsPath });
-          });
+	          menuItem('Open', !!item && !isDirectory && !!item.fsPath, function () {
+	            vscode.postMessage({ type: 'openSvnFile', path: item.fsPath });
+	          });
+	          menuItem('Open System Folder', !!targetPath, function () {
+	            vscode.postMessage({ type: 'svnRevealInOS', path: targetPath });
+	          });
+	          menuItem('Diff', canSvnDiff(item, isDirectory), function () {
+	            vscode.postMessage({ type: 'svnDiffPath', path: item.fsPath });
+	          });
           separator();
           menuItem('Update', !!targetPath, function () {
             vscode.postMessage({ type: 'svnUpdatePath', path: targetPath });
@@ -9086,21 +9185,28 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        var meta = document.createElement('div');
-        meta.className = 'refs-load-more-meta';
-        var rootName = svnSnapshot.workingCopyRoot
-          ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop()
-          : 'working copy';
-        meta.textContent = 'Changed: ' + (svnSnapshot.items || []).length + ' · ' + rootName;
-        svnPanelEl.appendChild(meta);
+	        var allSvnItems = Array.isArray(svnSnapshot.items) ? svnSnapshot.items : [];
+	        var visibleSvnItems = showSvnUnversioned
+	          ? allSvnItems
+	          : allSvnItems.filter(function (item) { return getSvnRawStatus(item) !== '?'; });
+	        var hiddenUnversioned = allSvnItems.length - visibleSvnItems.length;
 
-        if (!svnSnapshot.items || !svnSnapshot.items.length) {
-          var clean = document.createElement('div');
-          clean.className = 'refs-empty';
-          clean.textContent = 'No local SVN changes.';
-          svnPanelEl.appendChild(clean);
-          return;
-        }
+	        var meta = document.createElement('div');
+	        meta.className = 'refs-load-more-meta';
+	        var rootName = svnSnapshot.workingCopyRoot
+	          ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop()
+	          : 'working copy';
+	        meta.textContent = 'Changed: ' + visibleSvnItems.length + ' · ' + rootName
+	          + (hiddenUnversioned ? ' · hidden unversioned: ' + hiddenUnversioned : '');
+	        svnPanelEl.appendChild(meta);
+
+	        if (!visibleSvnItems.length) {
+	          var clean = document.createElement('div');
+	          clean.className = 'refs-empty';
+	          clean.textContent = allSvnItems.length ? 'Only unversioned SVN files are hidden.' : 'No local SVN changes.';
+	          svnPanelEl.appendChild(clean);
+	          return;
+	        }
 
         var changedHeader = document.createElement('div');
         changedHeader.className = 'refs-file-title';
@@ -9288,7 +9394,7 @@ function getWebviewContent(version: string): string {
           });
         }
 
-        var treeRoot = createSvnTree(svnSnapshot.items || []);
+	        var treeRoot = createSvnTree(visibleSvnItems);
         var treeWrap = document.createElement('div');
         treeWrap.className = 'vcs-tree';
         renderSvnTreeChildren(treeRoot, treeWrap);
@@ -10754,11 +10860,16 @@ function getSvnCommitWorkbenchHtml(): string {
       min-height: 24px;
       font-size: 12px;
     }
-    .chip.active {
-      border-color: var(--vscode-focusBorder);
-      background: var(--row-active);
-      color: var(--vscode-list-activeSelectionForeground, var(--fg));
-    }
+	    .chip.active {
+	      border-color: var(--vscode-focusBorder);
+	      background: var(--row-active);
+	      color: var(--vscode-list-activeSelectionForeground, var(--fg));
+	    }
+	    button.toggled {
+	      border-color: var(--vscode-focusBorder);
+	      background: var(--row-active);
+	      color: var(--vscode-list-activeSelectionForeground, var(--fg));
+	    }
     .table-wrap {
       min-height: 0;
       overflow: auto;
@@ -10886,10 +10997,11 @@ function getSvnCommitWorkbenchHtml(): string {
         <button id="btn-refresh" title="Refresh SVN status">Refresh</button>
         <button id="btn-select-all" title="Select all committable files">Select All</button>
         <button id="btn-select-none" title="Clear file selection">Select None</button>
-        <button id="btn-diff" title="Diff active file">Diff</button>
-        <button id="btn-add" title="Add selected unversioned files">Add</button>
-        <button id="btn-revert" title="Revert selected or active versioned files">Revert</button>
-        <span class="spacer"></span>
+	        <button id="btn-diff" title="Diff active file">Diff</button>
+	        <button id="btn-add" title="Add selected unversioned files">Add</button>
+	        <button id="btn-revert" title="Revert selected or active versioned files">Revert</button>
+	        <button id="btn-toggle-unversioned" title="Hide unversioned files">?</button>
+	        <span class="spacer"></span>
         <span class="chips" id="filter-chips">
           <button class="chip active" data-filter="all">All</button>
           <button class="chip" data-filter="committable">Committable</button>
@@ -10928,9 +11040,10 @@ function getSvnCommitWorkbenchHtml(): string {
       var vscode = acquireVsCodeApi();
       var snapshot = null;
       var items = [];
-      var busy = false;
-      var activePath = '';
-      var filter = 'all';
+	      var busy = false;
+	      var activePath = '';
+	      var filter = 'all';
+	      var showUnversioned = true;
 
       var statusPill = document.getElementById('status-pill');
       var targetLabel = document.getElementById('target-label');
@@ -10943,9 +11056,10 @@ function getSvnCommitWorkbenchHtml(): string {
       var btnSelectAll = document.getElementById('btn-select-all');
       var btnSelectNone = document.getElementById('btn-select-none');
       var btnDiff = document.getElementById('btn-diff');
-      var btnAdd = document.getElementById('btn-add');
-      var btnRevert = document.getElementById('btn-revert');
-      var btnCancel = document.getElementById('btn-cancel');
+	      var btnAdd = document.getElementById('btn-add');
+	      var btnRevert = document.getElementById('btn-revert');
+	      var btnToggleUnversioned = document.getElementById('btn-toggle-unversioned');
+	      var btnCancel = document.getElementById('btn-cancel');
       var btnCommit = document.getElementById('btn-commit');
       var chips = document.getElementById('filter-chips');
 
@@ -11015,14 +11129,22 @@ function getSvnCommitWorkbenchHtml(): string {
         btnSelectAll.disabled = busy || !items.length;
         btnSelectNone.disabled = busy || !items.length;
         btnDiff.disabled = busy || (!active && !hasSelected);
-        btnAdd.disabled = busy || !items.some(function (item) { return item.selected && item.isUnversioned; });
-        btnRevert.disabled = busy || !(items.some(function (item) { return item.selected && item.canRevert; }) || (active && active.canRevert));
-        btnCommit.disabled = busy || !hasMessage || !hasSelected;
-      }
+	        btnAdd.disabled = busy || !items.some(function (item) { return item.selected && item.isUnversioned; });
+	        btnRevert.disabled = busy || !(items.some(function (item) { return item.selected && item.canRevert; }) || (active && active.canRevert));
+	        btnToggleUnversioned.disabled = busy;
+	        btnCommit.disabled = busy || !hasMessage || !hasSelected;
+	      }
 
-      function itemMatchesFilter(item) {
-        var cls = statusClass(item);
-        if (filter === 'all') return true;
+	      function syncUnversionedToggle() {
+	        btnToggleUnversioned.classList.toggle('toggled', showUnversioned);
+	        btnToggleUnversioned.textContent = showUnversioned ? '?' : '-?';
+	        btnToggleUnversioned.title = showUnversioned ? 'Hide unversioned files' : 'Show unversioned files';
+	      }
+
+	      function itemMatchesFilter(item) {
+	        var cls = statusClass(item);
+	        if (!showUnversioned && cls === 'unversioned') return false;
+	        if (filter === 'all') return true;
         if (filter === 'committable') return !!item.canCommit;
         if (filter === 'modified') return cls === 'modified' || cls === 'props';
         if (filter === 'added') return cls === 'added';
@@ -11051,27 +11173,35 @@ function getSvnCommitWorkbenchHtml(): string {
         return items.filter(itemMatchesFilter).length;
       }
 
-      function renderSummary() {
-        var selected = selectedItems().length;
-        var committable = items.filter(function (item) { return item.canCommit; }).length;
-        var total = items.length;
-        var visible = visibleCount();
-        var base = 'Selected ' + selected + ' of ' + committable + ' committable file(s)';
-        if (visible !== total) {
-          base += ' - showing ' + visible + ' of ' + total;
-        } else {
-          base += ' - total ' + total;
-        }
-        if (!busy) {
+	      function renderSummary() {
+	        var selected = selectedItems().length;
+	        var committable = items.filter(function (item) { return item.canCommit; }).length;
+	        var total = items.length;
+	        var visible = visibleCount();
+	        var hiddenUnversioned = showUnversioned ? 0 : items.filter(function (item) { return statusClass(item) === 'unversioned'; }).length;
+	        var base = 'Selected ' + selected + ' of ' + committable + ' committable file(s)';
+	        if (visible !== total) {
+	          base += ' - showing ' + visible + ' of ' + total;
+	        } else {
+	          base += ' - total ' + total;
+	        }
+	        if (hiddenUnversioned) {
+	          base += ' - hidden unversioned ' + hiddenUnversioned;
+	        }
+	        if (!busy) {
           setStatus(base, '');
         }
       }
 
       function render() {
         fileBody.innerHTML = '';
-        var visible = items.filter(itemMatchesFilter);
-        emptyState.style.display = visible.length ? 'none' : 'block';
-        emptyState.textContent = items.length ? 'No files match this filter.' : 'No local SVN changes.';
+	        var visible = items.filter(itemMatchesFilter);
+	        emptyState.style.display = visible.length ? 'none' : 'block';
+	        emptyState.textContent = items.length
+	          ? (!showUnversioned && items.some(function (item) { return statusClass(item) === 'unversioned'; })
+	            ? 'Unversioned files are hidden.'
+	            : 'No files match this filter.')
+	          : 'No local SVN changes.';
 
         function renderFileRow(item) {
           var row = document.createElement('tr');
@@ -11192,9 +11322,14 @@ function getSvnCommitWorkbenchHtml(): string {
           paths: items.filter(function (item) { return item.selected && item.isUnversioned; }).map(function (item) { return item.fsPath; })
         });
       });
-      btnRevert.addEventListener('click', function () {
-        vscode.postMessage({ type: 'revert', paths: selectedPathsOrActive() });
-      });
+	      btnRevert.addEventListener('click', function () {
+	        vscode.postMessage({ type: 'revert', paths: selectedPathsOrActive() });
+	      });
+	      btnToggleUnversioned.addEventListener('click', function () {
+	        showUnversioned = !showUnversioned;
+	        syncUnversionedToggle();
+	        render();
+	      });
       btnCancel.addEventListener('click', function () {
         vscode.postMessage({ type: 'cancel' });
       });
@@ -11216,7 +11351,8 @@ function getSvnCommitWorkbenchHtml(): string {
         render();
       });
 
-      updateButtons();
+	      syncUnversionedToggle();
+	      updateButtons();
       vscode.postMessage({ type: 'ready' });
     })();
   </script>
