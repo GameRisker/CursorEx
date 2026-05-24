@@ -1345,6 +1345,26 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
   }
 
+  private getSvnDisplayPath(rawPath: string, root: string, fsPath?: string): string {
+    const resolvedPath = fsPath || (path.isAbsolute(rawPath) ? rawPath : path.resolve(root, rawPath));
+    const relativeToRoot = path.relative(root, resolvedPath);
+    if (relativeToRoot && !relativeToRoot.startsWith('..') && !path.isAbsolute(relativeToRoot)) {
+      return relativeToRoot.replace(/\\/g, '/');
+    }
+    if (!relativeToRoot) {
+      return path.basename(resolvedPath) || resolvedPath;
+    }
+
+    const workspaceRelative = vscode.workspace.asRelativePath(vscode.Uri.file(resolvedPath), false);
+    if (workspaceRelative && workspaceRelative !== resolvedPath && !path.isAbsolute(workspaceRelative)) {
+      return workspaceRelative.replace(/\\/g, '/');
+    }
+    if (rawPath && !path.isAbsolute(rawPath)) {
+      return rawPath.replace(/\\/g, '/');
+    }
+    return path.basename(resolvedPath) || resolvedPath;
+  }
+
   private async getSvnInfoForTarget(targetPath: string): Promise<SvnTargetInfo> {
     const candidates: string[] = [];
     const addCandidate = (candidate: string) => {
@@ -1401,9 +1421,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const fsPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(root, rawPath);
-    const uri = vscode.Uri.file(fsPath);
-    const relativeToRoot = path.relative(root, fsPath) || path.basename(fsPath);
-    const displayPath = vscode.workspace.asRelativePath(uri, false) || relativeToRoot || rawPath;
+    const displayPath = this.getSvnDisplayPath(rawPath, root, fsPath);
 
     let status = '?';
     let statusText = normalizedItem || 'changed';
@@ -1529,8 +1547,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     const root = info.workingCopyRoot || targetUri.fsPath;
     const statusXml = await this.runSvn(['status', '--xml', info.statusTarget], root);
     const items = this.parseSvnCommitStatusXml(statusXml, root);
-    const targetUriForLabel = vscode.Uri.file(info.statusTarget);
-    const targetLabel = vscode.workspace.asRelativePath(targetUriForLabel, false) || info.statusTarget;
+    const targetLabel = this.getSvnDisplayPath(info.statusTarget, root, info.statusTarget);
     return {
       targetPath: info.statusTarget,
       targetLabel,
@@ -1567,7 +1584,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     const fsPath = path.isAbsolute(rawPath)
       ? rawPath
       : path.resolve(root, rawPath);
-    const displayPath = vscode.workspace.asRelativePath(vscode.Uri.file(fsPath), false) || rawPath;
+    const displayPath = this.getSvnDisplayPath(rawPath, root, fsPath);
     return {
       path: displayPath,
       fsPath: fsPath,
@@ -7325,6 +7342,8 @@ function getWebviewContent(version: string): string {
               <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
               <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
               <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
+              <button class="pinex-toolbar-icon" id="svn-expand-tree-btn-inline" title="Expand SVN tree">+</button>
+              <button class="pinex-toolbar-icon" id="svn-collapse-tree-btn-inline" title="Collapse SVN tree">-</button>
               <button class="pinex-toolbar-icon" id="svn-toggle-unversioned-btn-inline" title="Hide unversioned files">?</button>
             </div>
             <div class="p4-panel scroll-area" id="svn-panel"></div>
@@ -7466,6 +7485,8 @@ function getWebviewContent(version: string): string {
       var p4PanelEl = document.getElementById('p4-panel');
       var svnPanelEl = document.getElementById('svn-panel');
       var svnContextMenuEl = document.getElementById('svn-context-menu');
+      var svnExpandTreeBtn = document.getElementById('svn-expand-tree-btn-inline');
+      var svnCollapseTreeBtn = document.getElementById('svn-collapse-tree-btn-inline');
       var svnToggleUnversionedBtn = document.getElementById('svn-toggle-unversioned-btn-inline');
       var refsSessionListEl = document.getElementById('refs-session-list');
       var refsResultListEl = document.getElementById('refs-result-list');
@@ -7754,6 +7775,15 @@ function getWebviewContent(version: string): string {
         svnToggleUnversionedBtn.classList.toggle('active', showSvnUnversioned);
         svnToggleUnversionedBtn.textContent = showSvnUnversioned ? '?' : '-?';
         svnToggleUnversionedBtn.title = showSvnUnversioned ? 'Hide unversioned files' : 'Show unversioned files';
+      }
+
+      function setSvnTreeExpandedState(expanded) {
+        if (!window.__svnTreeExpanded) window.__svnTreeExpanded = {};
+        window.__svnTreeDefaultExpanded = expanded;
+        Object.keys(window.__svnTreeExpanded).forEach(function (key) {
+          window.__svnTreeExpanded[key] = expanded;
+        });
+        renderSvn();
       }
 
       function debugPinExTabs(message) {
@@ -8389,6 +8419,18 @@ function getWebviewContent(version: string): string {
         svnRevertCurrentBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
           vscode.postMessage({ type: 'svnRevertCurrent' });
+        });
+      }
+      if (svnExpandTreeBtn) {
+        svnExpandTreeBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          setSvnTreeExpandedState(true);
+        });
+      }
+      if (svnCollapseTreeBtn) {
+        svnCollapseTreeBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          setSvnTreeExpandedState(false);
         });
       }
       if (svnToggleUnversionedBtn) {
@@ -9214,9 +9256,14 @@ function getWebviewContent(version: string): string {
         svnPanelEl.appendChild(changedHeader);
 
         if (!window.__svnTreeExpanded) window.__svnTreeExpanded = {};
+        if (typeof window.__svnTreeDefaultExpanded !== 'boolean') window.__svnTreeDefaultExpanded = true;
 
         function getSvnItemPath(item) {
           var raw = String((item && (item.path || item.fsPath)) || '').replace(/\\\\/g, '/');
+          var root = String(svnSnapshot.workingCopyRoot || '').replace(/\\\\/g, '/');
+          if (root && raw.indexOf(root + '/') === 0) {
+            raw = raw.substring(root.length + 1);
+          }
           raw = raw.replace(/^\\.\\//, '');
           if (!raw) raw = String((item && item.fsPath) || 'unknown');
           return raw;
@@ -9315,7 +9362,7 @@ function getWebviewContent(version: string): string {
         function renderSvnDir(node, parent) {
           var key = 'svn:' + node.key;
           if (typeof window.__svnTreeExpanded[key] !== 'boolean') {
-            window.__svnTreeExpanded[key] = true;
+            window.__svnTreeExpanded[key] = window.__svnTreeDefaultExpanded;
           }
           var expanded = !!window.__svnTreeExpanded[key];
           var dirWrap = document.createElement('div');
