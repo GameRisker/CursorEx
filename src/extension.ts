@@ -11260,7 +11260,7 @@ function getSvnCommitWorkbenchHtml(): string {
       function sortVisibleItems(sourceItems) {
         return (sourceItems || []).slice().sort(function (a, b) {
           return String(a.path || a.fsPath || '').localeCompare(String(b.path || b.fsPath || ''));
-        }
+        });
       }
 
       function visibleCount() {
