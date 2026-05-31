@@ -2023,14 +2023,28 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       vscode.window.showWarningMessage('SVN: no local file selected.');
       return;
     }
-    const diffText = await this.runSvn(['diff', uri.fsPath], this.getSvnWorkingDirectory()).catch((error: any) => {
-      return (error && (error.stdout || error.stderr || error.message)) ? String(error.stdout || error.stderr || error.message) : 'No diff output.';
-    });
-    const doc = await vscode.workspace.openTextDocument({
-      language: 'diff',
-      content: diffText || 'No diff output.'
-    });
-    await vscode.window.showTextDocument(doc, { preview: false });
+    try {
+      const info = await this.getSvnInfoForTarget(uri.fsPath);
+      const root = info.workingCopyRoot || path.dirname(uri.fsPath);
+      const statusXml = await this.runSvn(['status', '--xml', uri.fsPath], root, { timeoutMs: 30000 }).catch(() => '');
+      const item = this.parseSvnCommitStatusXml(statusXml, root).find(candidate => path.normalize(candidate.fsPath) === path.normalize(uri.fsPath));
+      const status = String(item?.status || '').toUpperCase();
+      if (item?.isUnversioned || status === '?') {
+        vscode.window.showWarningMessage('SVN: unversioned files do not have a base revision to diff.');
+        return;
+      }
+      if (status === 'A') {
+        vscode.window.showWarningMessage('SVN: added files do not have a base revision to diff.');
+        return;
+      }
+      if (status === '!' || status === 'D') {
+        vscode.window.showWarningMessage('SVN: deleted or missing files cannot be opened in the base diff view.');
+        return;
+      }
+      await this.openSvnBaseFileDiff(uri, root, this.getSvnDisplayPath(uri.fsPath, root, uri.fsPath));
+    } catch (error) {
+      vscode.window.showErrorMessage(`SVN diff failed: ${getCommandOutputFromError(error)}`);
+    }
   }
 
   async svnFileHistory(resource?: any): Promise<void> {
@@ -2192,24 +2206,28 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const baseText = await this.runSvn(['cat', '-r', 'BASE', item.fsPath], root);
-      const diffDir = path.join(this.context.globalStorageUri.fsPath, 'svn-diff');
-      await fs.mkdir(diffDir, { recursive: true });
-      const ext = path.extname(item.fsPath);
-      const stem = path.basename(item.fsPath, ext);
-      const basePath = path.join(diffDir, `${toSafeFileName(stem)}-${Date.now()}.BASE${ext}`);
-      await fs.writeFile(basePath, baseText, 'utf8');
-      await vscode.commands.executeCommand(
-        'vscode.diff',
-        vscode.Uri.file(basePath),
-        vscode.Uri.file(item.fsPath),
-        `SVN Diff: ${item.path}`
-      );
+      await this.openSvnBaseFileDiff(vscode.Uri.file(item.fsPath), root, item.path);
       return true;
     } catch (error) {
       vscode.window.showErrorMessage(`SVN diff failed: ${getCommandOutputFromError(error)}`);
       return false;
     }
+  }
+
+  private async openSvnBaseFileDiff(uri: vscode.Uri, root: string, label: string): Promise<void> {
+    const baseText = await this.runSvn(['cat', '-r', 'BASE', uri.fsPath], root, { timeoutMs: 30000 });
+    const diffDir = path.join(this.context.globalStorageUri.fsPath, 'svn-diff');
+    await fs.mkdir(diffDir, { recursive: true });
+    const ext = path.extname(uri.fsPath);
+    const stem = path.basename(uri.fsPath, ext);
+    const basePath = path.join(diffDir, `${toSafeFileName(stem)}-${Date.now()}.BASE${ext}`);
+    await fs.writeFile(basePath, baseText, 'utf8');
+    await vscode.commands.executeCommand(
+      'vscode.diff',
+      vscode.Uri.file(basePath),
+      uri,
+      `SVN Diff: ${label || path.basename(uri.fsPath)}`
+    );
   }
 
   async svnCommitWorkbench(resource?: any): Promise<void> {
