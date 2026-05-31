@@ -1301,11 +1301,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return folder?.uri.fsPath || process.cwd();
   }
 
-  private async runSvn(args: string[], cwd?: string): Promise<string> {
+  private async runSvn(args: string[], cwd?: string, options?: { timeoutMs?: number }): Promise<string> {
     const result = await execFileAsync('svn', args, {
       cwd: cwd || this.getSvnWorkingDirectory(),
       windowsHide: true,
-      maxBuffer: 32 * 1024 * 1024
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: options?.timeoutMs
     });
     return `${result.stdout || ''}${result.stderr || ''}`.trim();
   }
@@ -1388,7 +1389,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
     for (const candidate of candidates) {
       try {
-        const infoText = await this.runSvn(['info', candidate], path.dirname(candidate) || candidate);
+        const infoText = await this.runSvn(['info', candidate], path.dirname(candidate) || candidate, { timeoutMs: 10000 });
         const info = this.parseSvnInfoText(infoText, candidate);
         const statusTarget = this.isPathInside(info.workingCopyRoot, targetPath) ? targetPath : candidate;
         return {
@@ -1545,7 +1546,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   private async buildSvnCommitSnapshot(targetUri: vscode.Uri): Promise<SvnCommitWorkbenchSnapshot> {
     const info = await this.getSvnInfoForTarget(targetUri.fsPath);
     const root = info.workingCopyRoot || targetUri.fsPath;
-    const statusXml = await this.runSvn(['status', '--xml', info.statusTarget], root);
+    const statusXml = await this.runSvn(['status', '--xml', info.statusTarget], root, { timeoutMs: 60000 });
     const items = this.parseSvnCommitStatusXml(statusXml, root);
     const targetLabel = this.getSvnDisplayPath(info.statusTarget, root, info.statusTarget);
     return {
@@ -2083,6 +2084,9 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
     let currentSnapshot: SvnCommitWorkbenchSnapshot | null = null;
     let busy = false;
+    let disposed = false;
+    let initialRefreshStarted = false;
+    void this.appendDebugLog(`svnCommitWorkbench open target=${targetUri.fsPath}`);
 
     const postBusy = (message: string): void => {
       panel.webview.postMessage({ type: 'busy', message });
@@ -2098,8 +2102,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
     const refresh = async (): Promise<void> => {
       postBusy('Refreshing SVN status...');
+      void this.appendDebugLog(`svnCommitWorkbench refresh start target=${targetUri.fsPath}`);
       try {
         currentSnapshot = await this.buildSvnCommitSnapshot(targetUri);
+        void this.appendDebugLog(
+          `svnCommitWorkbench refresh success target=${currentSnapshot.targetPath} items=${currentSnapshot.items.length}`
+        );
         panel.webview.postMessage({
           type: 'snapshot',
           snapshot: currentSnapshot
@@ -2107,6 +2115,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       } catch (error) {
         const message = getCommandOutputFromError(error);
         currentSnapshot = null;
+        void this.appendDebugLog(`svnCommitWorkbench refresh error target=${targetUri.fsPath} error=${message || getErrorMessage(error)}`);
         postError(message || 'SVN status failed.');
       }
     };
@@ -2134,8 +2143,21 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       }
       switch (msg.type) {
         case 'ready':
+          void this.appendDebugLog(`svnCommitWorkbench message=ready target=${targetUri.fsPath}`);
+          if (!initialRefreshStarted) {
+            initialRefreshStarted = true;
+            void runOperation('Refreshing SVN status...', refresh);
+          }
+          break;
         case 'refresh':
+          void this.appendDebugLog(`svnCommitWorkbench message=refresh target=${targetUri.fsPath}`);
           void runOperation('Refreshing SVN status...', refresh);
+          break;
+        case 'clientError':
+          if (typeof msg.message === 'string' && msg.message) {
+            void this.appendDebugLog(`svnCommitWorkbench clientError target=${targetUri.fsPath} error=${msg.message}`);
+            postError(`SVN Commit UI error: ${msg.message}`);
+          }
           break;
         case 'cancel':
           panel.dispose();
@@ -2235,7 +2257,19 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    panel.onDidDispose(() => {
+      disposed = true;
+    });
+
     panel.webview.html = getSvnCommitWorkbenchHtml();
+    setTimeout(() => {
+      if (disposed || initialRefreshStarted) {
+        return;
+      }
+      initialRefreshStarted = true;
+      void this.appendDebugLog(`svnCommitWorkbench fallback refresh target=${targetUri.fsPath}`);
+      void runOperation('Refreshing SVN status...', refresh);
+    }, 800);
   }
 
   async svnCommitDirectory(resource?: any): Promise<void> {
@@ -11082,10 +11116,23 @@ function getSvnCommitWorkbenchHtml(): string {
     </footer>
   </div>
 
-  <script nonce="${nonce}">
-    (function () {
-      var vscode = acquireVsCodeApi();
-      var snapshot = null;
+	  <script nonce="${nonce}">
+	    (function () {
+	      var vscode = acquireVsCodeApi();
+	      window.addEventListener('error', function (event) {
+	        var message = event.message || 'Unknown webview script error';
+	        var line = document.getElementById('status-line');
+	        if (line) line.textContent = 'SVN Commit UI error: ' + message;
+	        vscode.postMessage({ type: 'clientError', message: message });
+	      });
+	      window.addEventListener('unhandledrejection', function (event) {
+	        var reason = event && event.reason;
+	        var message = reason && reason.message ? reason.message : String(reason || 'Unhandled webview promise rejection');
+	        var line = document.getElementById('status-line');
+	        if (line) line.textContent = 'SVN Commit UI error: ' + message;
+	        vscode.postMessage({ type: 'clientError', message: message });
+	      });
+	      var snapshot = null;
       var items = [];
 	      var busy = false;
 	      var activePath = '';
