@@ -135,6 +135,22 @@ interface SvnTargetInfo {
   statusTarget: string;
 }
 
+interface SvnHistoryChangedPath {
+  action: string;
+  path: string;
+  kind: string;
+  copyFromPath: string;
+  copyFromRevision: string;
+}
+
+interface SvnHistoryEntry {
+  revision: string;
+  author: string;
+  date: string;
+  message: string;
+  paths: SvnHistoryChangedPath[];
+}
+
 type UpdateState = 'idle' | 'checking' | 'available' | 'current' | 'installing' | 'installed' | 'error';
 type VcsProviderMode = 'auto' | 'p4' | 'svn' | 'both' | 'none';
 type ActiveVcsProvider = 'p4' | 'svn';
@@ -289,6 +305,15 @@ function decodeXmlAttribute(value: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&');
+}
+
+function escapeHtmlText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function parseXmlAttributes(value: string): Record<string, string> {
@@ -920,6 +945,11 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
             void this.svnDiffBaseFile(vscode.Uri.file(msg.path));
           }
           break;
+        case 'svnHistoryPath':
+          if (typeof msg.path === 'string' && msg.path) {
+            void this.svnFileHistory(vscode.Uri.file(msg.path));
+          }
+          break;
         case 'svnAddCurrent':
           void this.svnAddCurrentFile();
           break;
@@ -928,6 +958,9 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'svnDiffCurrent':
           void this.svnDiffCurrentFile();
+          break;
+        case 'svnHistoryCurrent':
+          void this.svnFileHistory();
           break;
         case 'openSvnFile':
           if (typeof msg.path === 'string' && msg.path) {
@@ -1982,12 +2015,103 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       vscode.window.showWarningMessage('SVN: no local file selected.');
       return;
     }
-    const historyText = await this.runSvn(['log', '-l', '30', uri.fsPath], this.getSvnWorkingDirectory());
-    const doc = await vscode.workspace.openTextDocument({
-      language: 'plaintext',
-      content: historyText || 'No history output.'
+
+    let root = path.dirname(uri.fsPath);
+    let targetLabel = vscode.workspace.asRelativePath(uri, false) || uri.fsPath;
+    let entries: SvnHistoryEntry[] = [];
+    let errorMessage = '';
+
+    try {
+      const info = await this.getSvnInfoForTarget(uri.fsPath);
+      root = info.workingCopyRoot || root;
+      targetLabel = this.getSvnDisplayPath(uri.fsPath, root, uri.fsPath);
+      void this.appendDebugLog(`svnFileHistory start target=${uri.fsPath}`);
+      const historyXml = await this.runSvn(['log', '--xml', '--verbose', '-l', '50', uri.fsPath], root, { timeoutMs: 60000 });
+      entries = this.parseSvnHistoryXml(historyXml);
+      void this.appendDebugLog(`svnFileHistory success target=${uri.fsPath} entries=${entries.length}`);
+    } catch (error) {
+      errorMessage = getCommandOutputFromError(error) || 'SVN file history failed.';
+      void this.appendDebugLog(`svnFileHistory error target=${uri.fsPath} error=${errorMessage}`);
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      'cursorToolWindow.svnFileHistory',
+      `SVN History: ${path.basename(uri.fsPath) || targetLabel}`,
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true
+      }
+    );
+
+    panel.webview.onDidReceiveMessage(msg => {
+      if (!msg || typeof msg.type !== 'string') {
+        return;
+      }
+      if (msg.type === 'diffRevision' && typeof msg.revision === 'string') {
+        void this.openSvnHistoryRevisionDiff(uri, root, msg.revision);
+      }
     });
-    await vscode.window.showTextDocument(doc, { preview: false });
+    panel.webview.html = getSvnFileHistoryHtml(targetLabel, uri.fsPath, entries, errorMessage);
+  }
+
+  private parseSvnHistoryXml(xml: string): SvnHistoryEntry[] {
+    const entries: SvnHistoryEntry[] = [];
+    const entryRegex = /<logentry\b([^>]*)>([\s\S]*?)<\/logentry>/g;
+    let entryMatch: RegExpExecArray | null;
+    while ((entryMatch = entryRegex.exec(xml)) !== null) {
+      const attrs = parseXmlAttributes(entryMatch[1] || '');
+      const body = entryMatch[2] || '';
+      entries.push({
+        revision: attrs.revision || '',
+        author: this.getSvnXmlTagText(body, 'author'),
+        date: this.getSvnXmlTagText(body, 'date'),
+        message: this.getSvnXmlTagText(body, 'msg'),
+        paths: this.parseSvnHistoryPaths(body)
+      });
+    }
+    return entries;
+  }
+
+  private parseSvnHistoryPaths(body: string): SvnHistoryChangedPath[] {
+    const paths: SvnHistoryChangedPath[] = [];
+    const pathsMatch = body.match(/<paths>([\s\S]*?)<\/paths>/);
+    const pathsBody = pathsMatch ? pathsMatch[1] : '';
+    const pathRegex = /<path\b([^>]*)>([\s\S]*?)<\/path>/g;
+    let pathMatch: RegExpExecArray | null;
+    while ((pathMatch = pathRegex.exec(pathsBody)) !== null) {
+      const attrs = parseXmlAttributes(pathMatch[1] || '');
+      paths.push({
+        action: attrs.action || '',
+        path: decodeXmlAttribute((pathMatch[2] || '').trim()),
+        kind: attrs.kind || '',
+        copyFromPath: attrs['copyfrom-path'] || '',
+        copyFromRevision: attrs['copyfrom-rev'] || ''
+      });
+    }
+    return paths;
+  }
+
+  private getSvnXmlTagText(body: string, tagName: string): string {
+    const match = body.match(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`));
+    return match ? decodeXmlAttribute(match[1].trim()) : '';
+  }
+
+  private async openSvnHistoryRevisionDiff(uri: vscode.Uri, root: string, revision: string): Promise<void> {
+    if (!/^\d+$/.test(revision)) {
+      vscode.window.showWarningMessage(`SVN: invalid revision ${revision}.`);
+      return;
+    }
+    try {
+      const diffText = await this.runSvn(['diff', '-c', revision, uri.fsPath], root, { timeoutMs: 60000 });
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'diff',
+        content: diffText || `No file diff output for r${revision}.`
+      });
+      await vscode.window.showTextDocument(doc, { preview: false });
+    } catch (error) {
+      vscode.window.showErrorMessage(`SVN history diff failed: ${getCommandOutputFromError(error)}`);
+    }
   }
 
   private getSvnCommitItemsByPath(paths: unknown, currentItems: SvnCommitFileItem[]): SvnCommitFileItem[] {
@@ -7375,6 +7499,7 @@ function getWebviewContent(version: string): string {
               <button class="pinex-toolbar-icon" id="svn-commit-dir-btn-inline" title="Open SVN Commit window">Commit...</button>
               <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
               <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
+              <button class="pinex-toolbar-icon" id="svn-history-current-btn-inline" title="Show current file history">History</button>
               <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
               <button class="pinex-toolbar-icon" id="svn-expand-tree-btn-inline" title="Expand SVN tree">+</button>
               <button class="pinex-toolbar-icon" id="svn-collapse-tree-btn-inline" title="Collapse SVN tree">-</button>
@@ -8448,6 +8573,13 @@ function getWebviewContent(version: string): string {
           vscode.postMessage({ type: 'svnDiffCurrent' });
         });
       }
+      var svnHistoryCurrentBtn = document.getElementById('svn-history-current-btn-inline');
+      if (svnHistoryCurrentBtn) {
+        svnHistoryCurrentBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          vscode.postMessage({ type: 'svnHistoryCurrent' });
+        });
+      }
       var svnRevertCurrentBtn = document.getElementById('svn-revert-current-btn-inline');
       if (svnRevertCurrentBtn) {
         svnRevertCurrentBtn.addEventListener('click', function (ev) {
@@ -9214,6 +9346,9 @@ function getWebviewContent(version: string): string {
 	          });
 	          menuItem('Diff', canSvnDiff(item, isDirectory), function () {
 	            vscode.postMessage({ type: 'svnDiffPath', path: item.fsPath });
+	          });
+	          menuItem('History', !!item && !isDirectory && !!item.fsPath && raw !== '?' && raw !== 'I', function () {
+	            vscode.postMessage({ type: 'svnHistoryPath', path: item.fsPath });
 	          });
           separator();
           menuItem('Update', !!targetPath, function () {
@@ -10781,6 +10916,182 @@ function getWebviewContent(version: string): string {
         }
       }
     }());
+  </script>
+</body>
+</html>`;
+}
+
+function getSvnFileHistoryHtml(
+  targetLabel: string,
+  targetPath: string,
+  entries: SvnHistoryEntry[],
+  errorMessage: string
+): string {
+  const nonce = getNonce();
+  const entryHtml = entries.map(entry => {
+    const message = entry.message || '(no message)';
+    const paths = entry.paths.length
+      ? entry.paths.map(changedPath => {
+        const copyInfo = changedPath.copyFromPath
+          ? ` from ${changedPath.copyFromPath}${changedPath.copyFromRevision ? '@' + changedPath.copyFromRevision : ''}`
+          : '';
+        return `<div class="path-row"><span class="action">${escapeHtmlText(changedPath.action || '?')}</span><span class="changed-path">${escapeHtmlText(changedPath.path || '')}</span><span class="copy">${escapeHtmlText(copyInfo)}</span></div>`;
+      }).join('')
+      : '<div class="path-row muted">No changed paths reported.</div>';
+    return `<article class="entry">
+      <div class="entry-top">
+        <div class="revision">r${escapeHtmlText(entry.revision || '?')}</div>
+        <div class="meta">${escapeHtmlText(entry.author || 'unknown')} · ${escapeHtmlText(entry.date || '')}</div>
+        <button data-revision="${escapeHtmlText(entry.revision)}">Diff</button>
+      </div>
+      <pre class="message">${escapeHtmlText(message)}</pre>
+      <div class="paths">${paths}</div>
+    </article>`;
+  }).join('');
+
+  const body = errorMessage
+    ? `<div class="empty error">${escapeHtmlText(errorMessage)}</div>`
+    : (entryHtml || '<div class="empty">No SVN history found for this file.</div>');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <title>SVN File History</title>
+  <style>
+    :root {
+      --bg: var(--vscode-editor-background);
+      --fg: var(--vscode-foreground);
+      --muted: var(--vscode-descriptionForeground);
+      --border: var(--vscode-panel-border);
+      --button: var(--vscode-button-secondaryBackground);
+      --button-fg: var(--vscode-button-secondaryForeground);
+      --button-hover: var(--vscode-button-secondaryHoverBackground);
+      --row: var(--vscode-list-hoverBackground);
+      --danger: var(--vscode-errorForeground);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+    }
+    header {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .target {
+      color: var(--muted);
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    main {
+      padding: 10px 16px 18px;
+    }
+    .entry {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 0 12px;
+    }
+    .entry-top {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    .revision {
+      font-family: var(--vscode-editor-font-family);
+      font-weight: 700;
+    }
+    .meta, .muted, .copy {
+      color: var(--muted);
+    }
+    button {
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--button);
+      color: var(--button-fg);
+      min-height: 24px;
+      padding: 2px 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover {
+      background: var(--button-hover);
+    }
+    .message {
+      margin: 8px 0;
+      white-space: pre-wrap;
+      font-family: var(--vscode-font-family);
+      color: var(--fg);
+    }
+    .paths {
+      display: grid;
+      gap: 3px;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+    }
+    .path-row {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .action {
+      display: inline-flex;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0 4px;
+      color: var(--fg);
+    }
+    .changed-path {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .empty {
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .empty.error {
+      color: var(--danger);
+      white-space: pre-wrap;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SVN File History</h1>
+    <div class="target" title="${escapeHtmlText(targetPath)}">${escapeHtmlText(targetLabel)}</div>
+  </header>
+  <main>${body}</main>
+  <script nonce="${nonce}">
+    (function () {
+      var vscode = acquireVsCodeApi();
+      document.addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target || !target.closest) return;
+        var button = target.closest('button[data-revision]');
+        if (!button) return;
+        var revision = button.getAttribute('data-revision') || '';
+        vscode.postMessage({ type: 'diffRevision', revision: revision });
+      });
+    })();
   </script>
 </body>
 </html>`;
