@@ -94,6 +94,8 @@ interface SvnSnapshot {
   available: boolean;
   status: string;
   workingCopyRoot: string;
+  scopePath: string;
+  scopeLabel: string;
   url: string;
   revision: string;
   items: SvnStatusItem[];
@@ -677,6 +679,8 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     available: false,
     status: 'Loading SVN...',
     workingCopyRoot: '',
+    scopePath: '',
+    scopeLabel: '',
     url: '',
     revision: '',
     items: [],
@@ -1334,6 +1338,23 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     return folder?.uri.fsPath || process.cwd();
   }
 
+  private getSvnProjectDirectory(): string {
+    const folders = vscode.workspace.workspaceFolders || [];
+    const editorPath = vscode.window.activeTextEditor?.document?.uri?.scheme === 'file'
+      ? vscode.window.activeTextEditor.document.uri.fsPath
+      : '';
+    if (editorPath && folders.length) {
+      const containing = folders
+        .map(folder => folder.uri.fsPath)
+        .filter(folderPath => this.isPathInside(folderPath, editorPath))
+        .sort((a, b) => b.length - a.length)[0];
+      if (containing) {
+        return containing;
+      }
+    }
+    return folders[0]?.uri.fsPath || this.getSvnWorkingDirectory();
+  }
+
   private async runSvn(args: string[], cwd?: string, options?: { timeoutMs?: number }): Promise<string> {
     const result = await execFileAsync('svn', args, {
       cwd: cwd || this.getSvnWorkingDirectory(),
@@ -1596,7 +1617,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     };
   }
 
-  private parseSvnStatusLine(line: string, root: string, externalPrefix = ''): SvnStatusItem | null {
+  private parseSvnStatusLine(line: string, root: string, externalPrefix = '', displayRoot = root): SvnStatusItem | null {
     if (!line || line.length < 2) {
       return null;
     }
@@ -1618,7 +1639,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     const fsPath = path.isAbsolute(rawPath)
       ? rawPath
       : path.resolve(root, rawPath);
-    const displayPath = this.getSvnDisplayPath(rawPath, root, fsPath);
+    const displayPath = this.getSvnDisplayPath(rawPath, displayRoot, fsPath);
     return {
       path: displayPath,
       fsPath: fsPath,
@@ -1871,15 +1892,14 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async refreshSvnSnapshot(): Promise<void> {
-    const cwd = this.getSvnWorkingDirectory();
+    const projectDir = this.getSvnProjectDirectory();
     try {
-      const infoText = await this.runSvn(['info'], cwd);
-      const workingCopyRoot = (infoText.match(/^Working Copy Root Path:\s*(.+)$/m)?.[1] || '').trim();
-      const url = (infoText.match(/^URL:\s*(.+)$/m)?.[1] || '').trim();
-      const revision = (infoText.match(/^Revision:\s*(.+)$/m)?.[1] || '').trim();
-      const root = workingCopyRoot || cwd;
+      const info = await this.getSvnInfoForTarget(projectDir);
+      const root = info.workingCopyRoot || projectDir;
+      const statusTarget = info.statusTarget || projectDir;
+      const scopeLabel = vscode.workspace.asRelativePath(vscode.Uri.file(statusTarget), false) || path.basename(statusTarget) || statusTarget;
 
-      const statusText = await this.runSvn(['status'], root).catch(() => '');
+      const statusText = await this.runSvn(['status', statusTarget], root).catch(() => '');
       const items: SvnStatusItem[] = [];
       if (statusText) {
         let externalPrefix = '';
@@ -1889,7 +1909,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
             externalPrefix = externalMatch[1].trim();
             continue;
           }
-          const item = this.parseSvnStatusLine(line, root, externalPrefix);
+          const item = this.parseSvnStatusLine(line, root, externalPrefix, statusTarget);
           if (item) {
             items.push(item);
           }
@@ -1898,10 +1918,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
       this.svnSnapshot = {
         available: true,
-        status: `Connected${revision ? ' · r' + revision : ''}`,
+        status: `Connected${info.revision ? ' · r' + info.revision : ''}`,
         workingCopyRoot: root,
-        url: url,
-        revision: revision,
+        scopePath: statusTarget,
+        scopeLabel: scopeLabel,
+        url: info.url,
+        revision: info.revision,
         items: items,
         updatedAt: Date.now()
       };
@@ -1910,6 +1932,8 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         available: false,
         status: (error && error.message) ? `SVN unavailable: ${error.message}` : 'SVN unavailable',
         workingCopyRoot: '',
+        scopePath: '',
+        scopeLabel: '',
         url: '',
         revision: '',
         items: [],
@@ -7742,7 +7766,7 @@ function getWebviewContent(version: string): string {
       var refsSelectedBySession = {};
       var refsVisibleCountBySession = {};
       var p4Snapshot = { available: false, status: 'Loading P4...', clientName: '', clientRoot: '', opened: [], pendingChanges: [], updatedAt: 0 };
-      var svnSnapshot = { available: false, status: 'Loading SVN...', workingCopyRoot: '', url: '', revision: '', items: [], updatedAt: 0 };
+      var svnSnapshot = { available: false, status: 'Loading SVN...', workingCopyRoot: '', scopePath: '', scopeLabel: '', url: '', revision: '', items: [], updatedAt: 0 };
       var vcsProvider = 'auto';
       var showP4Tab = true;
       var showSvnTab = true;
@@ -9404,9 +9428,9 @@ function getWebviewContent(version: string): string {
 
 	        var meta = document.createElement('div');
 	        meta.className = 'refs-load-more-meta';
-	        var rootName = svnSnapshot.workingCopyRoot
-	          ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop()
-	          : 'working copy';
+	        var rootName = svnSnapshot.scopeLabel || (svnSnapshot.scopePath
+	          ? svnSnapshot.scopePath.replace(/\\\\/g, '/').split('/').pop()
+	          : (svnSnapshot.workingCopyRoot ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop() : 'project'));
 	        meta.textContent = 'Changed: ' + visibleSvnItems.length + ' · ' + rootName
 	          + (hiddenUnversioned ? ' · hidden unversioned: ' + hiddenUnversioned : '');
 	        svnPanelEl.appendChild(meta);
@@ -9421,7 +9445,7 @@ function getWebviewContent(version: string): string {
 
         var changedHeader = document.createElement('div');
         changedHeader.className = 'refs-file-title';
-        changedHeader.textContent = 'Working Copy Changes';
+        changedHeader.textContent = 'Project Changes';
         svnPanelEl.appendChild(changedHeader);
 
         if (!window.__svnTreeExpanded) window.__svnTreeExpanded = {};
@@ -9429,7 +9453,7 @@ function getWebviewContent(version: string): string {
 
         function getSvnItemPath(item) {
           var raw = String((item && (item.path || item.fsPath)) || '').replace(/\\\\/g, '/');
-          var root = String(svnSnapshot.workingCopyRoot || '').replace(/\\\\/g, '/');
+          var root = String((svnSnapshot.scopePath || svnSnapshot.workingCopyRoot) || '').replace(/\\\\/g, '/');
           if (root && raw.indexOf(root + '/') === 0) {
             raw = raw.substring(root.length + 1);
           }
