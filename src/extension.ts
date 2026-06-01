@@ -168,6 +168,7 @@ interface UpdateStatusPayload {
   latestVersion?: string;
   releaseUrl?: string;
   assetName?: string;
+  releaseNotes?: string;
   state: UpdateState;
   message: string;
   canInstall: boolean;
@@ -182,6 +183,7 @@ interface GithubReleaseAsset {
 interface GithubRelease {
   tag_name?: string;
   html_url?: string;
+  body?: string;
   prerelease?: boolean;
   draft?: boolean;
   assets?: GithubReleaseAsset[];
@@ -194,6 +196,7 @@ interface UpdateInfo {
   releaseUrl: string;
   assetName: string;
   downloadUrl: string;
+  releaseNotes?: string;
   isUpdateAvailable: boolean;
 }
 
@@ -491,6 +494,7 @@ class GithubReleaseUpdateService {
       const tagName = typeof release.tag_name === 'string' ? release.tag_name : '';
       const latestVersion = tagName.replace(/^v/i, '');
       const releaseUrl = typeof release.html_url === 'string' ? release.html_url : 'https://github.com/GameRisker/CursorEx/releases/latest';
+      const releaseNotes = typeof release.body === 'string' ? release.body.trim() : '';
       const asset = (Array.isArray(release.assets) ? release.assets : []).find(item => {
         return typeof item.name === 'string' &&
           item.name.toLowerCase().endsWith('.vsix') &&
@@ -500,11 +504,12 @@ class GithubReleaseUpdateService {
       const comparison = compareSemver(latestVersion, EXTENSION_VERSION);
       if (comparison === null) {
         this.latestAvailableUpdate = undefined;
-        const info = this.createNoUpdateInfo(tagName || latestVersion || 'unknown', releaseUrl);
+        const info = this.createNoUpdateInfo(tagName || latestVersion || 'unknown', releaseUrl, releaseNotes);
         this.setStatus({
           state: 'current',
           latestVersion: tagName || latestVersion || undefined,
           releaseUrl: releaseUrl,
+          releaseNotes: releaseNotes,
           message: `No compatible update found. Latest release tag is ${tagName || 'unknown'}.`,
           canInstall: false,
           checkedAt: Date.now()
@@ -514,11 +519,12 @@ class GithubReleaseUpdateService {
 
       if (comparison <= 0) {
         this.latestAvailableUpdate = undefined;
-        const info = this.createNoUpdateInfo(latestVersion, releaseUrl);
+        const info = this.createNoUpdateInfo(latestVersion, releaseUrl, releaseNotes);
         this.setStatus({
           state: 'current',
           latestVersion: latestVersion,
           releaseUrl: releaseUrl,
+          releaseNotes: releaseNotes,
           message: comparison === 0 ? 'You are on the latest version.' : `Installed version v${EXTENSION_VERSION} is newer than GitHub latest v${latestVersion}.`,
           canInstall: false,
           checkedAt: Date.now()
@@ -537,6 +543,7 @@ class GithubReleaseUpdateService {
         releaseUrl: releaseUrl,
         assetName: asset.name,
         downloadUrl: asset.browser_download_url,
+        releaseNotes: releaseNotes,
         isUpdateAvailable: true
       };
 
@@ -546,6 +553,7 @@ class GithubReleaseUpdateService {
         latestVersion: update.latestVersion,
         releaseUrl: update.releaseUrl,
         assetName: update.assetName,
+        releaseNotes: update.releaseNotes,
         message: `Update v${update.latestVersion} is available.`,
         canInstall: true,
         checkedAt: Date.now()
@@ -579,6 +587,7 @@ class GithubReleaseUpdateService {
       latestVersion: update.latestVersion,
       releaseUrl: update.releaseUrl,
       assetName: update.assetName,
+      releaseNotes: update.releaseNotes,
       message: `Downloading ${update.assetName}...`,
       canInstall: false
     });
@@ -607,6 +616,7 @@ class GithubReleaseUpdateService {
         latestVersion: update.latestVersion,
         releaseUrl: update.releaseUrl,
         assetName: update.assetName,
+        releaseNotes: update.releaseNotes,
         message: `Installed v${update.latestVersion}. Reloading window...`,
         canInstall: false
       });
@@ -620,6 +630,7 @@ class GithubReleaseUpdateService {
         latestVersion: update.latestVersion,
         releaseUrl: update.releaseUrl,
         assetName: update.assetName,
+        releaseNotes: update.releaseNotes,
         message: `Install failed: ${getErrorMessage(error)}`,
         canInstall: true
       });
@@ -627,7 +638,7 @@ class GithubReleaseUpdateService {
     }
   }
 
-  private createNoUpdateInfo(latestVersion: string, releaseUrl: string): UpdateInfo {
+  private createNoUpdateInfo(latestVersion: string, releaseUrl: string, releaseNotes = ''): UpdateInfo {
     return {
       currentVersion: EXTENSION_VERSION,
       latestVersion: latestVersion,
@@ -635,6 +646,7 @@ class GithubReleaseUpdateService {
       releaseUrl: releaseUrl,
       assetName: '',
       downloadUrl: '',
+      releaseNotes: releaseNotes,
       isUpdateAvailable: false
     };
   }
@@ -12194,6 +12206,21 @@ function getSettingsWebviewContent(): string {
       flex-wrap: wrap;
       margin-top: 10px;
     }
+    .update-notes {
+      display: none;
+      max-height: 150px;
+      margin-top: 10px;
+      padding: 8px 10px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--panel-bg);
+      color: var(--panel-text-muted);
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.5;
+    }
     .tabs {
       display: flex;
       border-bottom: 1px solid var(--border);
@@ -12330,6 +12357,7 @@ function getSettingsWebviewContent(): string {
           <button id="btn-checkUpdates" class="btn btn-secondary">Check for Updates</button>
           <button id="btn-installUpdate" class="btn btn-primary" style="display:none;">Install Update</button>
         </div>
+        <pre id="update-notes" class="update-notes"></pre>
       </div>
       <div class="form-group">
         <label>Font size</label>
@@ -12613,10 +12641,13 @@ function getSettingsWebviewContent(): string {
         metaEl.textContent = metaParts.join(' | ');
       }
 
+      var lastUpdateStatus = null;
       function renderUpdateStatus(status) {
-        status = status || {};
+        status = Object.assign({}, lastUpdateStatus || {}, status || {});
+        lastUpdateStatus = status;
         var statusEl = document.getElementById('update-status');
         var metaEl = document.getElementById('update-meta');
+        var notesEl = document.getElementById('update-notes');
         var checkBtn = document.getElementById('btn-checkUpdates');
         var installBtn = document.getElementById('btn-installUpdate');
         if (!statusEl || !metaEl || !checkBtn || !installBtn) return;
@@ -12634,6 +12665,11 @@ function getSettingsWebviewContent(): string {
           metaParts.push('Checked: ' + new Date(status.checkedAt).toLocaleString());
         }
         metaEl.textContent = metaParts.join(' | ');
+        if (notesEl) {
+          var notes = (status.releaseNotes || '').trim();
+          notesEl.textContent = notes;
+          notesEl.style.display = notes ? 'block' : 'none';
+        }
 
         var busy = status.state === 'checking' || status.state === 'installing';
         checkBtn.disabled = busy;
@@ -12911,10 +12947,21 @@ function getSettingsWebviewContent(): string {
       });
 
       document.getElementById('btn-checkUpdates').addEventListener('click', function() {
+        renderUpdateStatus({
+          state: 'checking',
+          message: 'Checking GitHub Releases...',
+          canInstall: false,
+          checkedAt: Date.now()
+        });
         vscode.postMessage({ type: 'checkForUpdates' });
       });
 
       document.getElementById('btn-installUpdate').addEventListener('click', function() {
+        renderUpdateStatus({
+          state: 'installing',
+          message: 'Preparing update install...',
+          canInstall: false
+        });
         vscode.postMessage({ type: 'installUpdate' });
       });
 
