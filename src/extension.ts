@@ -4758,6 +4758,7 @@ async function searchWorkspaceClasses(
     const candidateFiles = await vscode.workspace.findFiles(includePattern, null, 1000);
     const typeRegex = /\b(class|struct|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
     const functionRegex = /\b(?:function\s+([A-Za-z_$][A-Za-z0-9_$]*)|(?:def|func)\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_!?=]*)|(?:public|private|protected|internal|static|virtual|override|async|extern|sealed|abstract|partial|readonly|unsafe|final|synchronized|inline|constexpr|friend|\s)*(?:[A-Za-z_][A-Za-z0-9_:<>,\[\].?*&]*\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*(?:\{|=>|;))/g;
+    const arrowFunctionRegex = /\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g;
     for (const uri of candidateFiles) {
       if (results.length >= maxItems) {
         break;
@@ -4800,6 +4801,16 @@ async function searchWorkspaceClasses(
           functionRegex.lastIndex = 0;
           while ((match = functionRegex.exec(lines[i])) !== null) {
             const name = match[1] || match[2] || match[3];
+            const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
+            const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+            if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
+              continue;
+            }
+            pushResult(name, uri, i + 1, 'function');
+          }
+          arrowFunctionRegex.lastIndex = 0;
+          while ((match = arrowFunctionRegex.exec(lines[i])) !== null) {
+            const name = match[1];
             const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
             const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
             if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
@@ -4904,7 +4915,7 @@ async function performQuickOpenSearch(
       }
     }
 
-    if (classResults.length === 0) {
+    if (classResults.length < maxItems) {
       const fallbackClassResults = await searchWorkspaceClasses(
         query,
         caseSensitive,
@@ -4976,7 +4987,7 @@ async function performQuickOpenSearch(
 
   const seen = new Set<string>();
   return merged.filter(item => {
-    const key = `${item.kind}:${item.uri.toString()}:${item.line || 0}`;
+    const key = `${item.kind}:${item.symbolKind || ''}:${item.label}:${item.uri.toString()}:${item.line || 0}`;
     if (seen.has(key)) {
       return false;
     }
@@ -5617,7 +5628,7 @@ async function showQuickOpenWindow(
             }
           }
 
-          if (classResults.length === 0) {
+          if (classResults.length < maxItems) {
             const workspaceClassResults = await searchWorkspaceClasses(
               query,
               caseSensitive,
@@ -5823,7 +5834,7 @@ async function showQuickOpenWindow(
         // 去重（基于 URI + line）
         const seen = new Set<string>();
         const uniqueResults = finalResults.filter(item => {
-          const key = `${item.uri?.toString() || ''}:${(item as any).line || 0}:${item.isClass || false}`;
+          const key = `${item.uri?.toString() || ''}:${(item as any).line || 0}:${item.isClass || false}:${(item as any).symbolKind || ''}:${item.label}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
