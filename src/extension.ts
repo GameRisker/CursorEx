@@ -4895,7 +4895,8 @@ async function performQuickOpenSearch(
   }
 
   if (shouldSearchClasses(searchMode)) {
-    if (indexSnapshot.ready && indexSnapshot.symbolCount > 0) {
+    const canUseSymbolIndex = indexSnapshot.ready && indexSnapshot.symbolCount > 0;
+    if (canUseSymbolIndex) {
       const indexedSymbols = await searchIndex.querySymbols(query, {
         limit: maxItems,
         includeExtensions: searchFileExtensions,
@@ -4915,7 +4916,7 @@ async function performQuickOpenSearch(
       }
     }
 
-    if (classResults.length < maxItems) {
+    if (!canUseSymbolIndex || classResults.length === 0) {
       const fallbackClassResults = await searchWorkspaceClasses(
         query,
         caseSensitive,
@@ -5601,7 +5602,8 @@ async function showQuickOpenWindow(
         }
 
         if (shouldSearchClasses(searchMode) && !token.isCancellationRequested) {
-          if (indexSnapshot.ready && indexSnapshot.symbolCount > 0) {
+          const canUseSymbolIndex = indexSnapshot.ready && indexSnapshot.symbolCount > 0;
+          if (canUseSymbolIndex) {
             const indexedSymbols = await searchIndex.querySymbols(query, {
               limit: maxItems,
               includeExtensions: searchFileExtensions,
@@ -5628,7 +5630,7 @@ async function showQuickOpenWindow(
             }
           }
 
-          if (classResults.length < maxItems) {
+          if (!canUseSymbolIndex || classResults.length === 0) {
             const workspaceClassResults = await searchWorkspaceClasses(
               query,
               caseSensitive,
