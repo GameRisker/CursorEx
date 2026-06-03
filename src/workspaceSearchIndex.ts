@@ -42,6 +42,7 @@ interface SearchIndexQueryOptions {
   includeExtensions?: string[];
   includeDirectories?: string[];
   caseSensitive?: boolean;
+  includeSymbolKinds?: IndexedSymbolEntry['kind'][];
 }
 
 interface PersistedIndexFileEntry {
@@ -136,6 +137,12 @@ function fuzzyScore(query: string, name: string, filePath: string): number {
   const q = normalizeForSearch(query);
   const n = normalizeForSearch(name);
   const p = normalizeForSearch(filePath);
+  return fuzzyScorePrepared(q, n, camelAcronym(name), p);
+}
+
+function fuzzyScorePrepared(q: string, normalizedName: string, acronym: string, normalizedPath = ''): number {
+  const n = normalizedName;
+  const p = normalizedPath;
   if (!q) {
     return 0;
   }
@@ -145,7 +152,7 @@ function fuzzyScore(query: string, name: string, filePath: string): number {
   if (n.startsWith(q)) score = Math.max(score, 8000 - Math.min(n.length, 200));
   if (n.includes(q)) score = Math.max(score, 6000 - n.indexOf(q) * 10);
 
-  const ac = camelAcronym(name);
+  const ac = acronym;
   if (ac && isSubsequenceMatch(q, ac)) {
     score = Math.max(score, 7000 - ac.length * 10);
   }
@@ -188,6 +195,8 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
   private readonly filesByName = new Map<string, Set<string>>();
   private readonly filesByExt = new Map<string, Set<string>>();
   private readonly symbolsByName = new Map<string, Set<string>>();
+  private readonly symbolsByKind = new Map<IndexedSymbolEntry['kind'], Set<string>>();
+  private readonly symbolEntriesByKind = new Map<IndexedSymbolEntry['kind'], Set<IndexedSymbolEntry>>();
   private readonly pendingChangedUris = new Set<string>();
 
   private rebuilding = false;
@@ -411,11 +420,31 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
     const limit = options.limit ?? 100;
     const includeExtensions = options.includeExtensions?.map(e => e.toLowerCase().replace(/^\./, '')).filter(Boolean) ?? [];
     const includeDirectories = options.includeDirectories?.map(v => v.toLowerCase()).filter(Boolean) ?? [];
+    const includeSymbolKinds = new Set(options.includeSymbolKinds ?? []);
     const q = query.trim();
+    const normalizedQuery = normalizeForSearch(q);
     const scored: Array<{ entry: IndexedSymbolEntry; score: number }> = [];
 
-    for (const symbols of this.symbolsByUri.values()) {
-      for (const symbol of symbols) {
+    let candidateSymbols: IndexedSymbolEntry[] | undefined;
+    if (includeSymbolKinds.size > 0) {
+      const byKindSymbols = new Set<IndexedSymbolEntry>();
+      for (const kind of includeSymbolKinds) {
+        const entries = this.symbolEntriesByKind.get(kind as IndexedSymbolEntry['kind']);
+        if (!entries) {
+          continue;
+        }
+        for (const entry of entries) {
+          byKindSymbols.add(entry);
+        }
+      }
+      candidateSymbols = Array.from(byKindSymbols);
+    }
+
+    if (candidateSymbols) {
+      for (const symbol of candidateSymbols) {
+        if (includeSymbolKinds.size > 0 && !includeSymbolKinds.has(symbol.kind)) {
+          continue;
+        }
         if (includeExtensions.length && !includeExtensions.includes(this.getExtension(symbol.uri))) {
           continue;
         }
@@ -426,11 +455,31 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
             continue;
           }
         }
-        const score = fuzzyScore(q, symbol.name, symbol.relativePath);
+        const score = fuzzyScorePrepared(normalizedQuery, symbol.normalizedName, symbol.acronym);
         if (score < 0) {
           continue;
         }
         scored.push({ entry: symbol, score });
+      }
+    } else {
+      for (const symbols of this.symbolsByUri.values()) {
+        for (const symbol of symbols) {
+          if (includeExtensions.length && !includeExtensions.includes(this.getExtension(symbol.uri))) {
+            continue;
+          }
+          if (includeDirectories.length) {
+            const rel = symbol.relativePath.toLowerCase().replace(/\\/g, '/');
+            const matched = includeDirectories.some(dir => rel.includes(dir));
+            if (!matched) {
+              continue;
+            }
+          }
+          const score = fuzzyScorePrepared(normalizedQuery, symbol.normalizedName, symbol.acronym);
+          if (score < 0) {
+            continue;
+          }
+          scored.push({ entry: symbol, score });
+        }
       }
     }
 
@@ -740,6 +789,8 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
   private addSymbolToLookups(key: string, entry: IndexedSymbolEntry): void {
     this.addToMapSet(this.symbolsByName, entry.normalizedName, key);
     this.addToMapSet(this.symbolsByName, entry.acronym, key);
+    this.addToMapSet(this.symbolsByKind, entry.kind, key);
+    this.addToEntrySet(this.symbolEntriesByKind, entry.kind, entry);
     for (const token of entry.tokens) {
       this.addToMapSet(this.symbolsByName, token, key);
     }
@@ -748,6 +799,8 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
   private removeSymbolFromLookups(key: string, entry: IndexedSymbolEntry): void {
     this.deleteFromMapSet(this.symbolsByName, entry.normalizedName, key);
     this.deleteFromMapSet(this.symbolsByName, entry.acronym, key);
+    this.deleteFromMapSet(this.symbolsByKind, entry.kind, key);
+    this.deleteFromEntrySet(this.symbolEntriesByKind, entry.kind, entry);
     for (const token of entry.tokens) {
       this.deleteFromMapSet(this.symbolsByName, token, key);
     }
@@ -778,12 +831,31 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
     }
   }
 
+  private addToEntrySet<K, V>(map: Map<K, Set<V>>, key: K, value: V): void {
+    const bucket = map.get(key) || new Set<V>();
+    bucket.add(value);
+    map.set(key, bucket);
+  }
+
+  private deleteFromEntrySet<K, V>(map: Map<K, Set<V>>, key: K, value: V): void {
+    const bucket = map.get(key);
+    if (!bucket) {
+      return;
+    }
+    bucket.delete(value);
+    if (bucket.size === 0) {
+      map.delete(key);
+    }
+  }
+
   private clearIndex(): void {
     this.fileByUri.clear();
     this.symbolsByUri.clear();
     this.filesByName.clear();
     this.filesByExt.clear();
     this.symbolsByName.clear();
+    this.symbolsByKind.clear();
+    this.symbolEntriesByKind.clear();
   }
 
   private async loadPersistedIndex(): Promise<void> {

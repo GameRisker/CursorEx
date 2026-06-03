@@ -24,8 +24,8 @@ interface ReferenceResultItem {
   line: number;
   character: number;
   preview: string;
-  container: string; // 归类用：类/结构体/接口/枚举 名称；找不到则回退为文件名
-  access?: 'read' | 'write'; // 字段/属性查询时区分读写
+  container: string; // 褰掔被鐢細绫?缁撴瀯浣?鎺ュ彛/鏋氫妇 鍚嶇О锛涙壘涓嶅埌鍒欏洖閫€涓烘枃浠跺悕
+  access?: 'read' | 'write'; // 瀛楁/灞炴€ф煡璇㈡椂鍖哄垎璇诲啓
 }
 
 type ReferenceSearchMode = 'references' | 'implementations';
@@ -668,7 +668,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   private static readonly DEBUG_HTML_FILE = 'cursor-tools-sidebar.html';
 
   private view: vscode.WebviewView | undefined;
-  // 打开文件 MRU（最近使用：聚焦/编辑）
+  // 鎵撳紑鏂囦欢 MRU锛堟渶杩戜娇鐢細鑱氱劍/缂栬緫锛?
   private openFileMru: string[] = [];
   private postOpenFilesTimer: NodeJS.Timeout | null = null;
   private referenceSessions: ReferenceSession[] = [];
@@ -700,7 +700,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   };
   private pendingPinExTab: string | null = null;
   private pendingPinExLocateUri: string | null = null;
-  // (FRE Preview Panel 已移除)
+  // (FRE Preview Panel 宸茬Щ闄?
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -821,7 +821,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    // 兼容当前规则：最多保留 1 个“未固定”的当前结果
+    // 鍏煎褰撳墠瑙勫垯锛氭渶澶氫繚鐣?1 涓€滄湭鍥哄畾鈥濈殑褰撳墠缁撴灉
     const pinnedList = restored.filter(s => !!s.pinned);
     const unpinnedList = restored.filter(s => !s.pinned).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     const keepUnpinned = unpinnedList.length ? [unpinnedList[unpinnedList.length - 1]] : [];
@@ -837,7 +837,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private persistReferenceSessions(): void {
-    // workspaceState 关闭 Cursor/VS Code 后仍会保留
+    // workspaceState 鍏抽棴 Cursor/VS Code 鍚庝粛浼氫繚鐣?
     try {
       this.context.workspaceState.update(CursorToolSidebarProvider.REFERENCE_STORAGE_KEY, {
         sessions: this.referenceSessions,
@@ -877,6 +877,15 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           if (typeof msg.message === 'string') {
             void this.appendDebugLog(`[webview] ${msg.message}`);
           }
+          break;
+        case 'logWebviewError':
+          void this.appendDebugLog(`[webview-error] ${JSON.stringify({
+            message: msg.message,
+            source: msg.source,
+            line: msg.line,
+            column: msg.column,
+            stack: msg.stack
+          })}`);
           break;
         case 'openSettings':
           vscode.commands.executeCommand('cursorToolWindow.openSettings');
@@ -1052,7 +1061,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   }
     });
 
-    // 延迟发送数据，确保 Webview 已准备好接收消息
+    // 寤惰繜鍙戦€佹暟鎹紝纭繚 Webview 宸插噯澶囧ソ鎺ユ敹娑堟伅
     setTimeout(() => {
       this.postGlobalSettings();
       this.postTodos();
@@ -1087,7 +1096,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       this.openFileMru.splice(idx, 1);
     }
     this.openFileMru.unshift(key);
-    // 防止无限增长
+    // 闃叉鏃犻檺澧為暱
     if (this.openFileMru.length > 200) {
       this.openFileMru.length = 200;
     }
@@ -1195,7 +1204,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   getOpenFilesSorted(): Array<{ uri: vscode.Uri; name: string; relativePath: string; isActive: boolean }> {
-    // 获取所有打开的文件（tab）
+    // 鑾峰彇鎵€鏈夋墦寮€鐨勬枃浠讹紙tab锛?
     const openFiles: Array<{ uri: vscode.Uri; name: string; relativePath: string; isActive: boolean }> = [];
     const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
     
@@ -1205,7 +1214,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           const uri = (tab.input as any).uri as vscode.Uri;
           if (uri.scheme === 'file') {
             const uriStr = uri.toString();
-            // 避免重复
+            // 閬垮厤閲嶅
             if (!openFiles.some(f => f.uri.toString() === uriStr)) {
               openFiles.push({
                 uri: uri,
@@ -1219,7 +1228,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       });
     });
 
-    // 确保当前活动文件在 MRU 顶部（用于排序）
+    // 纭繚褰撳墠娲诲姩鏂囦欢鍦?MRU 椤堕儴锛堢敤浜庢帓搴忥級
     if (activeUri) {
       try {
         this.noteOpenFileRecentlyUsed(vscode.Uri.parse(activeUri));
@@ -1228,14 +1237,14 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // 只保留仍在 openFiles 中的 MRU 项
+    // 鍙繚鐣欎粛鍦?openFiles 涓殑 MRU 椤?
     const openSet: { [k: string]: boolean } = {};
     for (let i = 0; i < openFiles.length; i++) {
       openSet[openFiles[i].uri.toString()] = true;
     }
     this.openFileMru = this.openFileMru.filter(u => !!openSet[u]);
 
-    // MRU 排序：最近聚焦/编辑的文件排最上；活动文件永远优先
+    // MRU 鎺掑簭锛氭渶杩戣仛鐒?缂栬緫鐨勬枃浠舵帓鏈€涓婏紱娲诲姩鏂囦欢姘歌繙浼樺厛
     openFiles.sort((a, b) => {
       if (a.isActive !== b.isActive) {
         return a.isActive ? -1 : 1;
@@ -1247,7 +1256,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       if (ra !== rb) {
         return ra - rb;
       }
-      // 兜底：按文件名排序，保证稳定
+      // 鍏滃簳锛氭寜鏂囦欢鍚嶆帓搴忥紝淇濊瘉绋冲畾
       return a.name.localeCompare(b.name);
     });
 
@@ -1621,7 +1630,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       workingCopyRoot: root,
       url: info.url,
       revision: info.revision,
-      status: `SVN${info.revision ? ' · r' + info.revision : ''}`,
+      status: `SVN${info.revision ? ' - r' + info.revision : ''}`,
       items,
       selectedCount: items.filter(item => item.selected).length,
       committableCount: items.filter(item => item.canCommit).length,
@@ -1880,7 +1889,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
       this.p4Snapshot = {
         available: true,
-        status: `Connected${clientName ? ' · ' + clientName : ''}`,
+        status: `Connected${clientName ? ' - ' + clientName : ''}`,
         clientName,
         clientRoot,
         opened,
@@ -1930,7 +1939,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
       this.svnSnapshot = {
         available: true,
-        status: `Connected${info.revision ? ' · r' + info.revision : ''}`,
+        status: `Connected${info.revision ? ' - r' + info.revision : ''}`,
         workingCopyRoot: root,
         scopePath: statusTarget,
         scopeLabel: scopeLabel,
@@ -2646,7 +2655,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       'vscode.diff',
       depotDoc.uri,
       uri,
-      `${title} ↔ ${path.basename(uri.fsPath)}`
+      `${title} 鈫?${path.basename(uri.fsPath)}`
     );
   }
 
@@ -2817,11 +2826,11 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  // (Cursor FRE Panel 预览已移除)
+  // (Cursor FRE Panel 棰勮宸茬Щ闄?
 
   private addOrReplaceReferenceSession(session: ReferenceSession): void {
     if (!session.pinned) {
-      // 规则：最多保留 1 个“未固定”的当前结果；新的搜索会覆盖它
+      // 瑙勫垯锛氭渶澶氫繚鐣?1 涓€滄湭鍥哄畾鈥濈殑褰撳墠缁撴灉锛涙柊鐨勬悳绱細瑕嗙洊瀹?
       const idx = this.referenceSessions.findIndex(s => !s.pinned);
       if (idx >= 0) {
         this.referenceSessions.splice(idx, 1, session);
@@ -2833,7 +2842,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // 固定结果：可保留多次搜索
+    // 鍥哄畾缁撴灉锛氬彲淇濈暀澶氭鎼滅储
     this.referenceSessions.push(session);
     this.activeReferenceSessionId = session.id;
     this.persistReferenceSessions();
@@ -2848,13 +2857,13 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     session.pinned = pinned;
 
     if (!pinned) {
-      // 取消固定后，仍然遵循“仅 1 个未固定结果”的规则
+      // 鍙栨秷鍥哄畾鍚庯紝浠嶇劧閬靛惊鈥滀粎 1 涓湭鍥哄畾缁撴灉鈥濈殑瑙勫垯
       for (let i = this.referenceSessions.length - 1; i >= 0; i--) {
         if (this.referenceSessions[i].id !== id && !this.referenceSessions[i].pinned) {
           this.referenceSessions.splice(i, 1);
         }
       }
-      // 放到末尾作为“当前”
+      // 鏀惧埌鏈熬浣滀负鈥滃綋鍓嶁€?
       this.referenceSessions.splice(idx, 1);
       this.referenceSessions.push(session);
     }
@@ -2889,7 +2898,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         if (s.range && s.range.contains(pos)) {
-          // 只关心类型符号作为“容器”
+          // 鍙叧蹇冪被鍨嬬鍙蜂綔涓衡€滃鍣ㄢ€?
           if (
             s.kind === vscode.SymbolKind.Class ||
             s.kind === vscode.SymbolKind.Struct ||
@@ -3011,7 +3020,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     };
     walk(list);
 
-    // 优先级：字段 > 属性 > 方法
+    // 浼樺厛绾э細瀛楁 > 灞炴€?> 鏂规硶
     if (seenField) return 'field';
     if (seenProperty) return 'property';
     if (seenMethod) return 'method';
@@ -3022,12 +3031,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     if (!lineText || !symbol) {
       return undefined;
     }
-    // 简单启发式：匹配到明显写入则算 write，否则算 read
-    // write：x =, x +=, ++x, x++, x--, --x, x <<= 等
-    // 注意：需要排除 == 和 === 比较操作符
+    // 绠€鍗曞惎鍙戝紡锛氬尮閰嶅埌鏄庢樉鍐欏叆鍒欑畻 write锛屽惁鍒欑畻 read
+    // write锛歺 =, x +=, ++x, x++, x--, --x, x <<= 绛?
+    // 娉ㄦ剰锛氶渶瑕佹帓闄?== 鍜?=== 姣旇緝鎿嶄綔绗?
     const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const writePatterns = [
-      // =(?!=) 使用否定前瞻，确保 = 后面不是 =，从而排除 == 和 ===
+      // =(?!=) 浣跨敤鍚﹀畾鍓嶇灮锛岀‘淇?= 鍚庨潰涓嶆槸 =锛屼粠鑰屾帓闄?== 鍜?===
       new RegExp(`\\b${escaped}\\b\\s*(=(?!=)|\\+=|-=|\\*=|/=|%=|\\|=|&=|\\^=|<<=|>>=)`),
       new RegExp(`(\\+\\+|--)\\s*\\b${escaped}\\b`),
       new RegExp(`\\b${escaped}\\b\\s*(\\+\\+|--)`)
@@ -3160,7 +3169,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private toLocationArray(raw: any): vscode.Location[] {
-    // execute*Provider 可能返回 Location[] 或 LocationLink[]（甚至 undefined / 混合）
+    // execute*Provider 鍙兘杩斿洖 Location[] 鎴?LocationLink[]锛堢敋鑷?undefined / 娣峰悎锛?
     const items: any[] = Array.isArray(raw) ? raw : [];
     const out: vscode.Location[] = [];
     for (let i = 0; i < items.length; i++) {
@@ -3225,7 +3234,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         doc.uri
       );
       queryContainer = this.getContainerNameFromSymbols(rootSymbols, pos);
-      // 关键修正：光标通常在“使用处”，不在声明 range 内，用“同类成员名”推断字段/属性/方法
+      // 鍏抽敭淇锛氬厜鏍囬€氬父鍦ㄢ€滀娇鐢ㄥ鈥濓紝涓嶅湪澹版槑 range 鍐咃紝鐢ㄢ€滃悓绫绘垚鍛樺悕鈥濇帹鏂瓧娈?灞炴€?鏂规硶
       if (symbolName) {
         queryKind = this.inferSymbolKindByNameInContainer(rootSymbols, pos, symbolName);
       } else {
@@ -3259,7 +3268,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
     const id = 'ref_' + String(this.referenceSeq++) + '_' + String(Date.now());
     const titleSymbol = symbolName || 'Symbol';
-    // 需求：搜索记录不显示文件，只显示类名/符号名
+    // 闇€姹傦細鎼滅储璁板綍涓嶆樉绀烘枃浠讹紝鍙樉绀虹被鍚?绗﹀彿鍚?
     const title = queryContainer ? `${queryContainer}.${titleSymbol}` : `${titleSymbol}`;
 
     const session: ReferenceSession = {
@@ -3288,7 +3297,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     this.addOrReplaceReferenceSession(session);
     this.postReferenceSessions();
 
-    // 如果结果被截断，给个提示
+    // 濡傛灉缁撴灉琚埅鏂紝缁欎釜鎻愮ず
     if (locs.length > displayMax) {
       const storedCount = used.length;
       const suffix = storedCount < locs.length ? ` Loaded ${storedCount} for browsing.` : '';
@@ -3331,7 +3340,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         doc.uri
       );
       queryContainer = this.getContainerNameFromSymbols(rootSymbols, pos);
-      // 光标通常在“使用处”，不在声明 range 内：用“同类成员名”推断字段/属性/方法
+      // 鍏夋爣閫氬父鍦ㄢ€滀娇鐢ㄥ鈥濓紝涓嶅湪澹版槑 range 鍐咃細鐢ㄢ€滃悓绫绘垚鍛樺悕鈥濇帹鏂瓧娈?灞炴€?鏂规硶
       if (symbolName) {
         queryKind = this.inferSymbolKindByNameInContainer(rootSymbols, pos, symbolName);
       } else {
@@ -3365,7 +3374,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 
     const id = 'impl_' + String(this.referenceSeq++) + '_' + String(Date.now());
     const titleSymbol = symbolName || 'Symbol';
-    // 需求：搜索记录不显示文件，只显示类名/符号名（用上方模式标签区分引用/实现）
+    // 闇€姹傦細鎼滅储璁板綍涓嶆樉绀烘枃浠讹紝鍙樉绀虹被鍚?绗﹀彿鍚嶏紙鐢ㄤ笂鏂规ā寮忔爣绛惧尯鍒嗗紩鐢?瀹炵幇锛?
     const title = queryContainer ? `${queryContainer}.${titleSymbol}` : `${titleSymbol}`;
 
     const session: ReferenceSession = {
@@ -3401,7 +3410,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // 发送当前光标行号和文件 URI 到 webview，用于符号面板定位
+  // 鍙戦€佸綋鍓嶅厜鏍囪鍙峰拰鏂囦欢 URI 鍒?webview锛岀敤浜庣鍙烽潰鏉垮畾浣?
   postCursorLine(line: number, uri?: vscode.Uri): void {
     if (!this.view) {
       console.log('[CursorEx] postCursorLine: no view');
@@ -3429,7 +3438,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     const ext = doc.fileName.split('.').pop()?.toLowerCase();
     console.log('[CursorEx] File extension:', ext);
     
-    // 只解析 C# 文件
+    // 鍙В鏋?C# 鏂囦欢
     if (ext !== 'cs') {
       console.log('[CursorEx] Not a C# file');
       this.view.webview.postMessage({ type: 'symbols', uri: uri, classes: [], members: [], notCs: true });
@@ -3441,14 +3450,14 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       kind: 'class' | 'struct' | 'interface' | 'enum' | 'field' | 'property' | 'method' | 'event' | 'constructor' | 'namespace';
       line: number;
       signature?: string;
-      type?: string;  // 变量/属性的类型，或函数的参数
+      type?: string;  // 鍙橀噺/灞炴€х殑绫诲瀷锛屾垨鍑芥暟鐨勫弬鏁?
       parentClass?: string;
     }
 
     const classes: SymbolItem[] = [];
     const members: SymbolItem[] = [];
 
-    // 使用 VS Code 内置的符号提供者
+    // 浣跨敤 VS Code 鍐呯疆鐨勭鍙锋彁渚涜€?
     try {
       const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
         'vscode.executeDocumentSymbolProvider',
@@ -3456,13 +3465,13 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       );
 
       if (symbols && symbols.length > 0) {
-        // 递归处理符号
+        // 閫掑綊澶勭悊绗﹀彿
         const processSymbols = (symbolList: vscode.DocumentSymbol[], parentName?: string) => {
           for (const sym of symbolList) {
             const line = sym.range.start.line;
             const name = sym.name;
             
-            // 类型符号
+            // 绫诲瀷绗﹀彿
             if (sym.kind === vscode.SymbolKind.Class) {
               classes.push({ name, kind: 'class', line, signature: name });
               if (sym.children) {
@@ -3484,33 +3493,33 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
                 processSymbols(sym.children, name);
               }
             } else if (sym.kind === vscode.SymbolKind.Namespace || sym.kind === vscode.SymbolKind.Module) {
-              // 命名空间，继续处理子符号
+              // 鍛藉悕绌洪棿锛岀户缁鐞嗗瓙绗﹀彿
               if (sym.children) {
                 processSymbols(sym.children, parentName);
     }
             } else if (parentName) {
-              // 成员符号
+              // 鎴愬憳绗﹀彿
               let kind: SymbolItem['kind'] = 'field';
               let memberName = name;
               let type = sym.detail || '';
               
               if (sym.kind === vscode.SymbolKind.Method || sym.kind === vscode.SymbolKind.Function) {
                 kind = 'method';
-                // name 可能已经包含参数如 "Method(int, string)"，直接使用
-                type = ''; // 方法不需要额外的 type
+                // name 鍙兘宸茬粡鍖呭惈鍙傛暟濡?"Method(int, string)"锛岀洿鎺ヤ娇鐢?
+                type = ''; // 鏂规硶涓嶉渶瑕侀澶栫殑 type
               } else if (sym.kind === vscode.SymbolKind.Constructor) {
                 kind = 'constructor';
                 type = '';
               } else if (sym.kind === vscode.SymbolKind.Property) {
                 kind = 'property';
-                // detail 可能包含类型信息，但也可能和 name 相同
+                // detail 鍙兘鍖呭惈绫诲瀷淇℃伅锛屼絾涔熷彲鑳藉拰 name 鐩稿悓
               } else if (sym.kind === vscode.SymbolKind.Field || sym.kind === vscode.SymbolKind.Variable) {
                 kind = 'field';
               } else if (sym.kind === vscode.SymbolKind.Event) {
                 kind = 'event';
               } else if (sym.kind === vscode.SymbolKind.EnumMember) {
                 kind = 'field';
-                type = ''; // 枚举成员不需要类型
+                type = ''; // 鏋氫妇鎴愬憳涓嶉渶瑕佺被鍨?
               }
               
               members.push({
@@ -3528,14 +3537,14 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         processSymbols(symbols);
       }
 
-      // 使用手动解析来获取正确的类型信息
-      // VS Code 符号提供者的 detail 字段格式不一致，无法可靠地获取类型
+      // 浣跨敤鎵嬪姩瑙ｆ瀽鏉ヨ幏鍙栨纭殑绫诲瀷淇℃伅
+      // VS Code 绗﹀彿鎻愪緵鑰呯殑 detail 瀛楁鏍煎紡涓嶄竴鑷达紝鏃犳硶鍙潬鍦拌幏鍙栫被鍨?
       console.log('[CursorEx] Using manual parse for accurate type info');
       classes.length = 0;
       members.length = 0;
       this.parseSymbolsManually(doc, classes, members);
     } catch (e) {
-      // 如果符号提供者失败，使用手动解析
+      // 濡傛灉绗﹀彿鎻愪緵鑰呭け璐ワ紝浣跨敤鎵嬪姩瑙ｆ瀽
       console.log('[CursorEx] Symbol parse error:', e);
       this.parseSymbolsManually(doc, classes, members);
     }
@@ -3556,25 +3565,25 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     console.log('[CursorEx] Total lines:', lines.length);
 
     /**
-     * 移除同一行内的注释（// 与 /* *\/），尽量避免误伤字符串/字符字面量。
-     * 说明：这里只处理“单行内”的块注释；跨行块注释仍由 inMultiLineComment 逻辑负责。
+     * 绉婚櫎鍚屼竴琛屽唴鐨勬敞閲婏紙// 涓?/* *\/锛夛紝灏介噺閬垮厤璇激瀛楃涓?瀛楃瀛楅潰閲忋€?
+     * 璇存槑锛氳繖閲屽彧澶勭悊鈥滃崟琛屽唴鈥濈殑鍧楁敞閲婏紱璺ㄨ鍧楁敞閲婁粛鐢?inMultiLineComment 閫昏緫璐熻矗銆?
      */
     const stripInlineComments = (src: string): string => {
       let out = '';
-      let inStr = false; // 普通字符串 "..."
-      let inVerbatimStr = false; // 逐字字符串 @"..."
-      let inChar = false; // 字符常量 'a'
+      let inStr = false; // 鏅€氬瓧绗︿覆 "..."
+      let inVerbatimStr = false; // 閫愬瓧瀛楃涓?@"..."
+      let inChar = false; // 瀛楃甯搁噺 'a'
 
       for (let idx = 0; idx < src.length; idx++) {
         const ch = src[idx];
         const next = idx + 1 < src.length ? src[idx + 1] : '';
 
-        // 处理逐字字符串结束："" 表示转义引号，不结束
+        // 澶勭悊閫愬瓧瀛楃涓茬粨鏉燂細"" 琛ㄧず杞箟寮曞彿锛屼笉缁撴潫
         if (inVerbatimStr) {
           out += ch;
           if (ch === '"') {
             if (next === '"') {
-              // "" -> 转义引号，吞掉下一个
+              // "" -> 杞箟寮曞彿锛屽悶鎺変笅涓€涓?
               out += next;
               idx++;
             } else {
@@ -3584,7 +3593,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           continue;
         }
 
-        // 处理普通字符串 / 字符常量
+        // 澶勭悊鏅€氬瓧绗︿覆 / 瀛楃甯搁噺
         if (inStr) {
           out += ch;
           if (ch === '"' && (idx === 0 || src[idx - 1] !== '\\')) {
@@ -3600,21 +3609,21 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           continue;
         }
 
-        // 不在字符串/字符中：检测注释起始
+        // 涓嶅湪瀛楃涓?瀛楃涓細妫€娴嬫敞閲婅捣濮?
         if (ch === '/' && next === '/') {
-          break; // 行注释：忽略后续
+          break; // 琛屾敞閲婏細蹇界暐鍚庣画
         }
         if (ch === '/' && next === '*') {
-          // 同行块注释：跳过直到 */
+          // 鍚岃鍧楁敞閲婏細璺宠繃鐩村埌 */
           const end = src.indexOf('*/', idx + 2);
           if (end < 0) {
-            break; // 注释到行尾
+            break; // 娉ㄩ噴鍒拌灏?
           }
-          idx = end + 1; // for-loop 会再 +1
+          idx = end + 1; // for-loop 浼氬啀 +1
           continue;
         }
 
-        // 进入逐字字符串 @"..."
+        // 杩涘叆閫愬瓧瀛楃涓?@"..."
         if (ch === '@' && next === '"') {
           out += ch;
           out += next;
@@ -3622,13 +3631,13 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           inVerbatimStr = true;
           continue;
         }
-        // 进入普通字符串 "..."
+        // 杩涘叆鏅€氬瓧绗︿覆 "..."
         if (ch === '"') {
           out += ch;
           inStr = true;
           continue;
         }
-        // 进入字符常量 'a'
+        // 杩涘叆瀛楃甯搁噺 'a'
         if (ch === '\'') {
           out += ch;
           inChar = true;
@@ -3641,21 +3650,21 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       return out;
     };
 
-    // 匹配类、结构体、接口、枚举
+    // 鍖归厤绫汇€佺粨鏋勪綋銆佹帴鍙ｃ€佹灇涓?
     const classRegex = /\b(class|struct|interface|enum)\s+(\w+)/;
-    // 匹配方法（捕获返回类型、函数名和参数）
-    // 格式：[修饰符] 返回类型 方法名(参数)
+    // 鍖归厤鏂规硶锛堟崟鑾疯繑鍥炵被鍨嬨€佸嚱鏁板悕鍜屽弬鏁帮級
+    // 鏍煎紡锛歔淇グ绗 杩斿洖绫诲瀷 鏂规硶鍚?鍙傛暟)
     const methodRegex = /^\s*(?:public|private|protected|internal|static|virtual|override|abstract|async|extern|new)\s+.*?(\w[\w<>\[\],\.\?]*)\s+(\w+)\s*(\([^)]*\))/;
-    // 匹配属性 - 格式：[修饰符] 类型 属性名 {
+    // 鍖归厤灞炴€?- 鏍煎紡锛歔淇グ绗 绫诲瀷 灞炴€у悕 {
     const propertyRegex = /^\s*(?:public|private|protected|internal|static|virtual|override|abstract|new)\s+.*?(\w[\w<>\[\],\.\?]*)\s+(\w+)\s*\{/;
-    // 匹配字段 - 格式：[修饰符] 类型 字段名 [=|;]
+    // 鍖归厤瀛楁 - 鏍煎紡锛歔淇グ绗 绫诲瀷 瀛楁鍚?[=|;]
     const fieldRegex = /^\s*(?:public|private|protected|internal|static|readonly|const|new)\s+.*?(\w[\w<>\[\],\.\?]*)\s+(\w+)\s*[=;]/;
 
     let currentClass: string | undefined;
     let currentClassKind: 'class' | 'struct' | 'interface' | 'enum' | undefined;
     let braceDepth = 0;
     let classStartDepth = 0;
-    let classBodyEntered = false;  // 是否已经进入类的大括号内部
+    let classBodyEntered = false;  // 鏄惁宸茬粡杩涘叆绫荤殑澶ф嫭鍙峰唴閮?
     let inMultiLineComment = false;
 
     for (let i = 0; i < lines.length; i++) {
@@ -3664,12 +3673,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       const codeLine = stripInlineComments(line);
       const trimmedCodeLine = codeLine.trim();
       
-      // 跳过空行
+      // 璺宠繃绌鸿
       if (trimmedCodeLine === '') {
         continue;
     }
 
-      // 处理多行注释
+      // 澶勭悊澶氳娉ㄩ噴
       if (inMultiLineComment) {
         if (trimmedLine.includes('*/')) {
           inMultiLineComment = false;
@@ -3680,12 +3689,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         inMultiLineComment = !trimmedLine.includes('*/');
         continue;
       }
-      // 跳过单行注释
+      // 璺宠繃鍗曡娉ㄩ噴
       if (trimmedLine.startsWith('//')) {
         continue;
   }
 
-      // 计算大括号深度（简单处理，忽略字符串中的大括号）
+      // 璁＄畻澶ф嫭鍙锋繁搴︼紙绠€鍗曞鐞嗭紝蹇界暐瀛楃涓蹭腑鐨勫ぇ鎷彿锛?
       let openBraces = 0;
       let closeBraces = 0;
       let inStr = false;
@@ -3700,11 +3709,11 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
         }
       }
 
-      // 记录本行更新大括号深度前的层级，用于判断是否处于“类型顶层”
-      // 这样可以支持无访问修饰符的成员声明，同时避免误把方法体内的局部变量当成字段。
+      // 璁板綍鏈鏇存柊澶ф嫭鍙锋繁搴﹀墠鐨勫眰绾э紝鐢ㄤ簬鍒ゆ柇鏄惁澶勪簬鈥滅被鍨嬮《灞傗€?
+      // 杩欐牱鍙互鏀寔鏃犺闂慨楗扮鐨勬垚鍛樺０鏄庯紝鍚屾椂閬垮厤璇妸鏂规硶浣撳唴鐨勫眬閮ㄥ彉閲忓綋鎴愬瓧娈点€?
       const depthBefore = braceDepth;
 
-      // 检测类定义
+      // 妫€娴嬬被瀹氫箟
       const classMatch = codeLine.match(classRegex);
       if (classMatch && !currentClass) {
         const kind = classMatch[1] as 'class' | 'struct' | 'interface' | 'enum';
@@ -3716,22 +3725,22 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
           signature: trimmedCodeLine.replace(/\{.*$/, '').trim()
         });
         currentClass = name;
-        currentClassKind = kind;  // 保存类型
+        currentClassKind = kind;  // 淇濆瓨绫诲瀷
         classStartDepth = braceDepth;
-        classBodyEntered = false;  // 还没进入类的 { }
+        classBodyEntered = false;  // 杩樻病杩涘叆绫荤殑 { }
   }
 
-      // 更新大括号深度
+      // 鏇存柊澶ф嫭鍙锋繁搴?
       braceDepth += openBraces - closeBraces;
       
-      // 检测是否进入了类的大括号内部
+      // 妫€娴嬫槸鍚﹁繘鍏ヤ簡绫荤殑澶ф嫭鍙峰唴閮?
       if (currentClass && !classBodyEntered && braceDepth > classStartDepth) {
         classBodyEntered = true;
     }
       
-      // 枚举成员检测（不需要访问修饰符）
+      // 鏋氫妇鎴愬憳妫€娴嬶紙涓嶉渶瑕佽闂慨楗扮锛?
       if (currentClass && classBodyEntered && currentClassKind === 'enum' && !classMatch) {
-        // 枚举成员格式：Name, 或 Name = value,
+        // 鏋氫妇鎴愬憳鏍煎紡锛歂ame, 鎴?Name = value,
         const enumMemberMatch = trimmedCodeLine.match(/^(\w+)\s*(?:=\s*[^,]+)?[,]?$/);
         if (enumMemberMatch && !trimmedCodeLine.startsWith('//') && !trimmedCodeLine.startsWith('{') && !trimmedCodeLine.startsWith('}')) {
           members.push({
@@ -3745,12 +3754,12 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
       
-      // 在类内部检测成员
+      // 鍦ㄧ被鍐呴儴妫€娴嬫垚鍛?
       const atTypeTopLevel = !!currentClass && classBodyEntered && depthBefore === classStartDepth + 1;
       
-      // 检测成员：已进入类内部，且处于类型顶层（不在方法体/访问器内部），不是类定义，不是枚举（枚举已单独处理）
+      // 妫€娴嬫垚鍛橈細宸茶繘鍏ョ被鍐呴儴锛屼笖澶勪簬绫诲瀷椤跺眰锛堜笉鍦ㄦ柟娉曚綋/璁块棶鍣ㄥ唴閮級锛屼笉鏄被瀹氫箟锛屼笉鏄灇涓撅紙鏋氫妇宸插崟鐙鐞嗭級
       if (currentClass && classBodyEntered && !classMatch && atTypeTopLevel && currentClassKind !== 'enum') {
-          // 构造函数 - 类名后直接跟括号
+          // 鏋勯€犲嚱鏁?- 绫诲悕鍚庣洿鎺ヨ窡鎷彿
           if (new RegExp(`\\b${currentClass}\\s*\\(`).test(codeLine)) {
             const ctorMatch = codeLine.match(new RegExp(`${currentClass}\\s*(\\([^)]*\\))`));
             if (ctorMatch) {
@@ -3764,8 +3773,8 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
               });
             }
           }
-          // 字段 - 有 = 或 以;结尾（优先检测，避免 new Xxx() 被误判为方法）
-          // 匹配格式：修饰符 类型 变量名 = ... 或 修饰符 类型 变量名;
+          // 瀛楁 - 鏈?= 鎴?浠?缁撳熬锛堜紭鍏堟娴嬶紝閬垮厤 new Xxx() 琚鍒や负鏂规硶锛?
+          // 鍖归厤鏍煎紡锛氫慨楗扮 绫诲瀷 鍙橀噺鍚?= ... 鎴?淇グ绗?绫诲瀷 鍙橀噺鍚?
           else if (/\s+\w+\s*[=;]/.test(codeLine) && !/\)\s*$/.test(trimmedCodeLine) && !/\)\s*\{/.test(codeLine)) {
             const match = codeLine.match(/(\w[\w<>\[\],\.\?]*)\s+(\w+)\s*[=;]/);
             if (match && !['return', 'if', 'else', 'for', 'while', 'var', 'using', 'throw', 'new', 'get', 'set', 'class', 'struct', 'interface', 'enum'].includes(match[2])) {
@@ -3779,7 +3788,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
               });
             }
           }
-          // 属性 - 有 { 但没有 (
+          // 灞炴€?- 鏈?{ 浣嗘病鏈?(
           else if (codeLine.includes('{') && !codeLine.includes('(')) {
             const match = codeLine.match(/(\S+)\s+(\w+)\s*\{/);
             if (match && !['if', 'for', 'while', 'switch', 'get', 'set', 'class', 'struct', 'interface', 'enum'].includes(match[2])) {
@@ -3793,9 +3802,9 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
               });
           }
           }
-          // 方法 - 有括号但不是构造函数，且不是字段/属性
+          // 鏂规硶 - 鏈夋嫭鍙蜂絾涓嶆槸鏋勯€犲嚱鏁帮紝涓斾笉鏄瓧娈?灞炴€?
           else if (codeLine.includes('(') && codeLine.includes(')')) {
-            // 排除带 = new 的字段初始化
+            // 鎺掗櫎甯?= new 鐨勫瓧娈靛垵濮嬪寲
             if (!/=\s*new\s+/.test(codeLine)) {
               const match = codeLine.match(/(\w+)\s*(\([^)]*\))/);
               if (match && !['if', 'for', 'while', 'switch', 'catch', 'using', 'lock', 'foreach', 'return', 'throw', 'new'].includes(match[1])) {
@@ -3813,7 +3822,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       }
       }
 
-      // 如果回到类开始的深度，说明类结束了（只有在已进入类内部后才检查）
+      // 濡傛灉鍥炲埌绫诲紑濮嬬殑娣卞害锛岃鏄庣被缁撴潫浜嗭紙鍙湁鍦ㄥ凡杩涘叆绫诲唴閮ㄥ悗鎵嶆鏌ワ級
       if (currentClass && classBodyEntered && braceDepth <= classStartDepth) {
         currentClass = undefined;
         currentClassKind = undefined;
@@ -3821,7 +3830,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       }
     }
     
-    // 日志：解析结果
+    // 鏃ュ織锛氳В鏋愮粨鏋?
     console.log('[CursorEx] Manual parse done: classes=' + classes.length + ', members=' + members.length);
     if (members.length > 0) {
       console.log('[CursorEx] First member:', JSON.stringify(members[0]));
@@ -3910,6 +3919,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
 let sidebarProvider: CursorToolSidebarProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+  initQuickOpenFileLogger(context);
   context.globalState.setKeysForSync([VCS_PROVIDER_STATE_KEY]);
   const scanner = new TodoScanner(context);
   const commentManager = new CommentManager(context);
@@ -3962,18 +3972,18 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 监听活动编辑器变化，通知 PinEx 高亮当前文件
+  // 鐩戝惉娲诲姩缂栬緫鍣ㄥ彉鍖栵紝閫氱煡 PinEx 楂樹寒褰撳墠鏂囦欢
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(editor => {
       provider.noteOpenFileRecentlyUsed(editor?.document.uri);
-      // 若该文件已 Pin，则更新 Pin 的最近使用时间
+      // 鑻ヨ鏂囦欢宸?Pin锛屽垯鏇存柊 Pin 鐨勬渶杩戜娇鐢ㄦ椂闂?
       pinExManager.touch(editor?.document.uri);
       provider.postActiveFile(editor?.document.uri);
       provider.schedulePostOpenFiles();
     })
   );
 
-  // 监听编辑（文本变更）：把“最近编辑”的文件顶到最上面（节流刷新列表）
+  // 鐩戝惉缂栬緫锛堟枃鏈彉鏇达級锛氭妸鈥滄渶杩戠紪杈戔€濈殑鏂囦欢椤跺埌鏈€涓婇潰锛堣妭娴佸埛鏂板垪琛級
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(e => {
       if (e.contentChanges && e.contentChanges.length > 0) {
@@ -3985,7 +3995,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 监听光标位置变化，通知符号面板定位
+  // 鐩戝惉鍏夋爣浣嶇疆鍙樺寲锛岄€氱煡绗﹀彿闈㈡澘瀹氫綅
   let lastCursorLine = -1;
   let lastCursorUri = '';
   console.log('[CursorEx] Registering onDidChangeTextEditorSelection listener');
@@ -4005,14 +4015,14 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // 监听 Tab 变化，更新打开文件列表
+  // 鐩戝惉 Tab 鍙樺寲锛屾洿鏂版墦寮€鏂囦欢鍒楄〃
   context.subscriptions.push(
     vscode.window.tabGroups.onDidChangeTabs(() => {
       provider.schedulePostOpenFiles();
     })
   );
 
-  // Hover 提供者：在有 Comment 的行上返回對應內容，配合 editor.action.showHover 使用
+  // Hover 鎻愪緵鑰咃細鍦ㄦ湁 Comment 鐨勮涓婅繑鍥炲皪鎳夊収瀹癸紝閰嶅悎 editor.action.showHover 浣跨敤
   const hoverSelector: vscode.DocumentSelector = [
     { scheme: 'file' },
     { scheme: 'untitled' }
@@ -4066,7 +4076,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       let line = editor.selection.active.line;
       if (args && typeof args.lineNumber === 'number') {
-        // VS Code 行号上下文通常是 1-based，这里做一下安全转换
+        // VS Code 琛屽彿涓婁笅鏂囬€氬父鏄?1-based锛岃繖閲屽仛涓€涓嬪畨鍏ㄨ浆鎹?
         const fromCtx = args.lineNumber;
         if (fromCtx >= 1) {
           line = fromCtx - 1;
@@ -4077,10 +4087,10 @@ export function activate(context: vscode.ExtensionContext) {
 
       const uri = editor.document.uri;
       if (commentManager.hasComment(uri, line)) {
-        // 已有注釋則刪除
+        // 宸叉湁娉ㄩ噵鍓囧埅闄?
         commentManager.removeComment(uri, line);
       } else {
-        // 沒有則添加 / 編輯
+        // 娌掓湁鍓囨坊鍔?/ 绶ㄨ集
         await commentManager.addOrEditComment(uri, line);
       }
     }),
@@ -4151,26 +4161,26 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // 跳转到“固定窗口”（侧边栏 Webview）后再定位
+      // 璺宠浆鍒扳€滃浐瀹氱獥鍙ｂ€濓紙渚ц竟鏍?Webview锛夊悗鍐嶅畾浣?
       try {
         await vscode.commands.executeCommand('cursorToolWindow.sidebar.focus');
       } catch {
         // ignore
       }
 
-      // 确保切到 PinEx 固定 Tab
+      // 纭繚鍒囧埌 PinEx 鍥哄畾 Tab
       provider.postSwitchPinExTab('pin');
-      // 让 PinEx 面板展开并滚动到目标文件（若在已 PinEx 的目录中也会递归展开）
+      // 璁?PinEx 闈㈡澘灞曞紑骞舵粴鍔ㄥ埌鐩爣鏂囦欢锛堣嫢鍦ㄥ凡 PinEx 鐨勭洰褰曚腑涔熶細閫掑綊灞曞紑锛?
       provider.postPinExLocateToUri(targetUri);
     }),
     vscode.commands.registerCommand('cursorToolWindow.findReferencesEx', async () => {
-      // 尽量把侧边栏展示出来，方便用户看到 References Tab
+      // 灏介噺鎶婁晶杈规爮灞曠ず鍑烘潵锛屾柟渚跨敤鎴风湅鍒?References Tab
       try {
         await vscode.commands.executeCommand('cursorToolWindow.sidebar.focus');
       } catch {
         // ignore
       }
-      // 自动跳转到 References Tab
+      // 鑷姩璺宠浆鍒?References Tab
       provider.postSwitchPinExTab('refs');
       provider.postReferenceSearching(true);
       try {
@@ -4180,13 +4190,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
     vscode.commands.registerCommand('cursorToolWindow.findImplementationsEx', async () => {
-      // 尽量把侧边栏展示出来，方便用户看到 References Tab
+      // 灏介噺鎶婁晶杈规爮灞曠ず鍑烘潵锛屾柟渚跨敤鎴风湅鍒?References Tab
       try {
         await vscode.commands.executeCommand('cursorToolWindow.sidebar.focus');
       } catch {
         // ignore
       }
-      // 自动跳转到 References Tab
+      // 鑷姩璺宠浆鍒?References Tab
       provider.postSwitchPinExTab('refs');
       provider.postReferenceSearching(true);
       try {
@@ -4207,12 +4217,15 @@ export function activate(context: vscode.ExtensionContext) {
       provider.notifyPinExFsChanged();
     }),
     vscode.commands.registerCommand('cursorToolWindow.quickOpen', async () => {
+      logQuickOpenDebug('command-trigger', { command: 'cursorToolWindow.quickOpen' });
       await showQuickOpenWindow(context, provider, pinExManager, searchIndex);
     }),
     vscode.commands.registerCommand('cursorToolWindow.quickOpenFiles', async () => {
+      logQuickOpenDebug('command-trigger', { command: 'cursorToolWindow.quickOpenFiles' });
       await showQuickOpenWindow(context, provider, pinExManager, searchIndex, 'files');
     }),
     vscode.commands.registerCommand('cursorToolWindow.quickOpenClasses', async () => {
+      logQuickOpenDebug('command-trigger', { command: 'cursorToolWindow.quickOpenClasses' });
       await showQuickOpenWindow(context, provider, pinExManager, searchIndex, 'classes');
     }),
     vscode.commands.registerCommand('cursorToolWindow.p4Edit', async (resource?: any) => {
@@ -4264,13 +4277,11 @@ export function activate(context: vscode.ExtensionContext) {
       await provider.vcsDiffFile(resource);
     }),
     vscode.commands.registerCommand('cursorToolWindow.openKeyboardShortcuts', async () => {
-      // 打开快捷键设置页面
       await vscode.commands.executeCommand('workbench.action.openGlobalKeybindings');
-      // 提示用户搜索命令
       setTimeout(() => {
         vscode.window.showInformationMessage(
-          '请在快捷键设置中搜索 "cursorToolWindow.quickOpen" 来配置 Quick Open 的快捷键',
-          '知道了'
+          'Search "cursorToolWindow.quickOpen" in Keyboard Shortcuts to configure Quick Open.',
+          'OK'
         );
       }, 500);
     })
@@ -4290,6 +4301,12 @@ interface QuickSearchResultItem {
   pinned?: boolean;
   symbolKind?: string;
 }
+
+type QuickOpenFilterMode = 'all' | 'files' | 'classes' | 'functions';
+type QuickOpenSymbolKind = 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'method' | 'constructor';
+
+const TYPE_SYMBOL_KINDS: QuickOpenSymbolKind[] = ['class', 'struct', 'interface', 'enum'];
+const FUNCTION_SYMBOL_KINDS: QuickOpenSymbolKind[] = ['function', 'method', 'constructor'];
 
 function normalizeSearchPath(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -4430,6 +4447,28 @@ function shouldSearchClasses(searchMode: string): boolean {
   return searchMode === 'class' || searchMode === 'fileclass' || searchMode === 'all';
 }
 
+function isFunctionSymbolKind(kind?: string): boolean {
+  return kind === 'function' || kind === 'method' || kind === 'constructor';
+}
+
+function getSymbolKindsForFilterMode(filterMode: QuickOpenFilterMode): QuickOpenSymbolKind[] | undefined {
+  if (filterMode === 'classes') {
+    return TYPE_SYMBOL_KINDS;
+  }
+  if (filterMode === 'functions') {
+    return FUNCTION_SYMBOL_KINDS;
+  }
+  return undefined;
+}
+
+function shouldSearchFilesForFilterMode(searchMode: string, filterMode: QuickOpenFilterMode): boolean {
+  return filterMode !== 'classes' && filterMode !== 'functions' && shouldSearchFiles(searchMode);
+}
+
+function shouldSearchSymbolsForFilterMode(searchMode: string, filterMode: QuickOpenFilterMode): boolean {
+  return filterMode !== 'files' && shouldSearchClasses(searchMode);
+}
+
 function symbolIconForKind(kind?: string): string {
   if (kind === 'function') return 'symbol-function';
   if (kind === 'method') return 'symbol-method';
@@ -4441,7 +4480,7 @@ function symbolIconForKind(kind?: string): string {
 }
 
 function shouldSearchContent(searchMode: string): boolean {
-  return searchMode === 'content' || searchMode === 'all';
+  return searchMode === 'content';
 }
 
 function dedupeUris(uris: vscode.Uri[]): vscode.Uri[] {
@@ -4458,7 +4497,69 @@ function dedupeUris(uris: vscode.Uri[]): vscode.Uri[] {
   return result;
 }
 
+let quickOpenLogFilePath: string | undefined;
+let quickOpenLogWriteQueue: Promise<void> = Promise.resolve();
+const QUICK_OPEN_LOG_MAX_BYTES = 2 * 1024 * 1024;
+
+function initQuickOpenFileLogger(context: vscode.ExtensionContext): void {
+  quickOpenLogFilePath = path.join(context.globalStorageUri.fsPath, 'logs', 'quick-open.log');
+  logQuickOpenDebug('logger-init', {
+    version: EXTENSION_VERSION,
+    logFile: quickOpenLogFilePath,
+    extensionPath: context.extensionPath,
+    storagePath: context.globalStorageUri.fsPath
+  });
+}
+
+function serializeQuickOpenLogData(data: any): string {
+  if (typeof data === 'undefined') {
+    return '';
+  }
+  try {
+    return JSON.stringify(data, (_key, value) => {
+      if (value instanceof vscode.Uri) {
+        return value.toString();
+      }
+      if (value instanceof Error) {
+        return { name: value.name, message: value.message, stack: value.stack };
+      }
+      return value;
+    });
+  } catch {
+    return String(data);
+  }
+}
+
+function appendQuickOpenLogLine(line: string): void {
+  if (!quickOpenLogFilePath) {
+    return;
+  }
+
+  const targetPath = quickOpenLogFilePath;
+  quickOpenLogWriteQueue = quickOpenLogWriteQueue
+    .then(async () => {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      try {
+        const stat = await fs.stat(targetPath);
+        if (stat.size > QUICK_OPEN_LOG_MAX_BYTES) {
+          await fs.rename(targetPath, `${targetPath}.old`).catch(async () => {
+            await fs.unlink(targetPath).catch(() => undefined);
+          });
+        }
+      } catch {
+        // Missing log file is fine.
+      }
+      await fs.appendFile(targetPath, line + os.EOL, 'utf8');
+    })
+    .catch(err => {
+      console.log('[CursorEx][QuickOpen] log-write-error:', err);
+    });
+}
+
 function logQuickOpenDebug(label: string, data?: any): void {
+  const payload = serializeQuickOpenLogData(data);
+  appendQuickOpenLogLine(`${new Date().toISOString()} [${label}]${payload ? ' ' + payload : ''}`);
+
   if (typeof data === 'undefined') {
     console.log(`[CursorEx][QuickOpen] ${label}`);
     return;
@@ -4593,6 +4694,7 @@ async function searchWorkspaceText(
   caseSensitive: boolean,
   includePattern: string,
   excludePattern: string | undefined,
+  maxFilesToSearch: number,
   maxContentMatches: number,
   token: vscode.CancellationToken,
   pinExManager: PinExManager
@@ -4601,7 +4703,7 @@ async function searchWorkspaceText(
   const candidateFiles = await vscode.workspace.findFiles(
     includePattern,
     excludePattern,
-    getSearchResultLimit(0),
+    getSearchResultLimit(maxFilesToSearch),
     token
   );
   const queryToSearch = caseSensitive ? query : query.toLowerCase();
@@ -4630,7 +4732,7 @@ async function searchWorkspaceText(
 
         results.push({
           label: `$(search) ${previewText}`,
-          description: `${fileName}:${lineIndex + 1}${isPinned ? ' 📌' : ''}`,
+          description: `${fileName}:${lineIndex + 1}${isPinned ? ' P' : ''}`,
           detail: `Line ${lineIndex + 1}`,
           uri: uri,
           isClass: false,
@@ -4658,12 +4760,17 @@ async function searchWorkspaceClasses(
   searchFileExtensions: string[],
   searchIncludeDirectories: string[],
   maxItems: number,
-  pinExManager: PinExManager
+  pinExManager: PinExManager,
+  includeSymbolKinds?: QuickOpenSymbolKind[]
 ): Promise<Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }>> {
   const queryToSearch = caseSensitive ? query : query.toLowerCase();
   const results: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }> = [];
   const seen = new Set<string>();
+  const symbolKindSet = new Set(includeSymbolKinds ?? []);
   const pushResult = (name: string, uri: vscode.Uri, line: number, symbolKind: string = 'class') => {
+    if (symbolKindSet.size > 0 && !symbolKindSet.has(symbolKind as QuickOpenSymbolKind)) {
+      return;
+    }
     const key = `${uri.toString()}:${name}:${line}:${symbolKind}`;
     if (seen.has(key)) {
       return;
@@ -4674,7 +4781,7 @@ async function searchWorkspaceClasses(
     const isPinned = pinExManager.isPinned(uri);
     results.push({
       label: `$(${symbolIconForKind(symbolKind)}) ${name}`,
-      description: `in ${fileName}${isPinned ? ' 馃搶 pinned' : ''}`,
+      description: `in ${fileName}${isPinned ? ' P pinned' : ''}`,
       uri: uri,
       isClass: true,
       line: line,
@@ -4714,12 +4821,15 @@ async function searchWorkspaceClasses(
     } else {
       continue;
     }
+    if (symbolKindSet.size > 0 && !symbolKindSet.has(symbolKind as QuickOpenSymbolKind)) {
+      continue;
+    }
     if (!matchesSearchExtension(uri, searchFileExtensions) || !matchesSearchIncludeDirectories(uri, searchIncludeDirectories)) {
       continue;
     }
 
     const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
-    const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+    const fuzzyScore = computeFilenameFuzzyScore(query, name, '');
     if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
       continue;
     }
@@ -4735,7 +4845,7 @@ async function searchWorkspaceClasses(
     const isPinned = pinExManager.isPinned(uri);
     results.push({
       label: `$(${symbolIconForKind(symbolKind)}) ${name}`,
-      description: `in ${fileName}${isPinned ? ' 📌 pinned' : ''}`,
+      description: `in ${fileName}${isPinned ? ' P pinned' : ''}`,
       uri: uri,
       isClass: true,
       line: line,
@@ -4772,7 +4882,7 @@ async function searchWorkspaceClasses(
           while ((match = typeRegex.exec(lines[i])) !== null) {
             const name = match[2];
             const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
-            const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+            const fuzzyScore = computeFilenameFuzzyScore(query, name, '');
             if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
               continue;
             }
@@ -4785,7 +4895,7 @@ async function searchWorkspaceClasses(
             const isPinned = pinExManager.isPinned(uri);
             results.push({
               label: `$(symbol-class) ${name}`,
-              description: `in ${fileName}${isPinned ? ' 馃搶 pinned' : ''}`,
+              description: `in ${fileName}${isPinned ? ' P pinned' : ''}`,
               uri: uri,
               isClass: true,
               line: i + 1,
@@ -4802,7 +4912,7 @@ async function searchWorkspaceClasses(
           while ((match = functionRegex.exec(lines[i])) !== null) {
             const name = match[1] || match[2] || match[3];
             const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
-            const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+            const fuzzyScore = computeFilenameFuzzyScore(query, name, '');
             if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
               continue;
             }
@@ -4812,7 +4922,7 @@ async function searchWorkspaceClasses(
           while ((match = arrowFunctionRegex.exec(lines[i])) !== null) {
             const name = match[1];
             const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
-            const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+            const fuzzyScore = computeFilenameFuzzyScore(query, name, '');
             if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
               continue;
             }
@@ -4872,6 +4982,7 @@ async function performQuickOpenSearch(
         caseSensitive,
         includePattern,
         excludePattern,
+        maxFilesToSearch,
         maxContentMatches,
         tokenSource.token,
         pinExManager
@@ -5156,10 +5267,11 @@ function getQuickOpenPanelHtml(): string {
       <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="files">Files</button>
       <button class="filter-btn" data-filter="classes">Classes</button>
+      <button class="filter-btn" data-filter="functions">Functions</button>
     </aside>
     <main class="main">
       <div class="toolbar">
-        <input id="searchInput" class="search-input" type="text" placeholder="Search files, classes, and content" />
+        <input id="searchInput" class="search-input" type="text" placeholder="Search files, classes, and functions" />
         <div id="status" class="status">Ready</div>
       </div>
       <div id="results" class="results"></div>
@@ -5192,9 +5304,7 @@ function getQuickOpenPanelHtml(): string {
 
     function render() {
       const filtered = items.filter(item => {
-        if (filter === 'files') return item.kind === 'file';
-        if (filter === 'classes') return item.kind === 'class';
-        return true;
+        return matchesFilter(item);
       });
       if (activeIndex >= filtered.length) activeIndex = Math.max(0, filtered.length - 1);
       if (!filtered.length) {
@@ -5209,6 +5319,17 @@ function getQuickOpenPanelHtml(): string {
           '<div><div class="result-title">' + escapeHtml(item.label) + '</div><div class="result-meta">' + escapeHtml(meta || '') + '</div></div>' +
           '</div>';
       }).join('');
+    }
+
+    function isFunctionItem(item) {
+      return item && (item.symbolKind === 'function' || item.symbolKind === 'method' || item.symbolKind === 'constructor');
+    }
+
+    function matchesFilter(item) {
+      if (filter === 'files') return item.kind === 'file';
+      if (filter === 'classes') return item.kind === 'class' && !isFunctionItem(item);
+      if (filter === 'functions') return item.kind === 'class' && isFunctionItem(item);
+      return true;
     }
 
     function escapeHtml(value) {
@@ -5239,7 +5360,7 @@ function getQuickOpenPanelHtml(): string {
 
     searchInput.addEventListener('input', requestSearch);
     searchInput.addEventListener('keydown', event => {
-      const filtered = items.filter(item => filter === 'all' ? true : filter === 'files' ? item.kind === 'file' : item.kind === 'class');
+      const filtered = items.filter(item => matchesFilter(item));
       if (event.key === 'ArrowDown') {
         activeIndex = Math.min(activeIndex + 1, Math.max(0, filtered.length - 1));
         render();
@@ -5258,7 +5379,7 @@ function getQuickOpenPanelHtml(): string {
       const row = event.target.closest('.result-item');
       if (!row) return;
       const index = Number(row.getAttribute('data-index'));
-      const filtered = items.filter(item => filter === 'all' ? true : filter === 'files' ? item.kind === 'file' : item.kind === 'class');
+      const filtered = items.filter(item => matchesFilter(item));
       if (filtered[index]) {
         activeIndex = index;
         render();
@@ -5344,29 +5465,37 @@ async function showQuickOpenWindow(
   provider: CursorToolSidebarProvider,
   pinExManager: PinExManager,
   searchIndex: WorkspaceSearchIndex,
-  initialFilterMode: 'all' | 'files' | 'classes' = 'all'
+  initialFilterMode: QuickOpenFilterMode = 'all'
 ): Promise<void> {
   const FILTER_ALL = 'all';
   const FILTER_FILES = 'files';
   const FILTER_CLASSES = 'classes';
+  const FILTER_FUNCTIONS = 'functions';
 
   quickOpenContext = context;
-  // 如果窗口已存在，直接显示
+  // 濡傛灉绐楀彛宸插瓨鍦紝鐩存帴鏄剧ず
   if (quickOpenPick) {
+    logQuickOpenDebug('quickpick-reuse', { initialFilterMode });
     quickOpenPick.show();
     return;
   }
 
+  logQuickOpenDebug('quickpick-create', {
+    initialFilterMode,
+    version: EXTENSION_VERSION,
+    workspaceFolders: (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath)
+  });
   const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }>();
   quickOpenPick = quickPick;
-  let resultFilterMode: 'all' | 'files' | 'classes' = initialFilterMode;
+  let resultFilterMode: QuickOpenFilterMode = initialFilterMode;
   const filterButtons: vscode.QuickInputButton[] = [
     { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Show all results' },
     { iconPath: new vscode.ThemeIcon('file'), tooltip: 'Show file results only' },
-    { iconPath: new vscode.ThemeIcon('symbol-class'), tooltip: 'Show symbol results only' }
+    { iconPath: new vscode.ThemeIcon('symbol-class'), tooltip: 'Show class/type results only' },
+    { iconPath: new vscode.ThemeIcon('symbol-function'), tooltip: 'Show function/method results only' }
   ];
   
-  quickPick.placeholder = 'Search files, content, and symbols. Shortcuts: /f files, /c symbols, /a all';
+  quickPick.placeholder = 'Search cached files, classes, and functions. Shortcuts: /f files, /c classes, /m functions, /a all';
   quickPick.matchOnDescription = true;
   quickPick.buttons = filterButtons;
 
@@ -5374,39 +5503,41 @@ async function showQuickOpenWindow(
     const suffix = resultFilterMode === FILTER_FILES
       ? 'Files'
       : resultFilterMode === FILTER_CLASSES
-        ? 'Symbols'
-        : 'All';
+        ? 'Classes'
+        : resultFilterMode === FILTER_FUNCTIONS
+          ? 'Functions'
+          : 'All';
     quickPick.title = `Cursor Tools Search [${suffix}]`;
   };
 
   updateQuickPickTitle();
   
-  // 从 workspaceState 读取保存的窗口尺寸偏好（用于未来可能的自定义窗口）
+  // 浠?workspaceState 璇诲彇淇濆瓨鐨勭獥鍙ｅ昂瀵稿亸濂斤紙鐢ㄤ簬鏈潵鍙兘鐨勮嚜瀹氫箟绐楀彛锛?
   const savedSize = context.workspaceState.get<{ width: number; height: number }>('cursorToolWindow.quickOpen.size', { width: 800, height: 600 });
   
-  // 注意：VS Code 的 QuickPick 高度是自动计算的，无法直接控制
-  // 但我们可以通过设置更多的 items 来让窗口自动变高
+  // 娉ㄦ剰锛歏S Code 鐨?QuickPick 楂樺害鏄嚜鍔ㄨ绠楃殑锛屾棤娉曠洿鎺ユ帶鍒?
+  // 浣嗘垜浠彲浠ラ€氳繃璁剧疆鏇村鐨?items 鏉ヨ绐楀彛鑷姩鍙橀珮
 
-  // 获取打开的文件（按 MRU 排序）
+  // 鑾峰彇鎵撳紑鐨勬枃浠讹紙鎸?MRU 鎺掑簭锛?
   const openFiles = provider.getOpenFilesSorted();
   
-  // 获取所有 PinEx 的文件（排除目录，只显示文件）
+  // 鑾峰彇鎵€鏈?PinEx 鐨勬枃浠讹紙鎺掗櫎鐩綍锛屽彧鏄剧ず鏂囦欢锛?
   const pinnedItems = pinExManager.getItemsSortedByRecent();
   const pinnedFiles = pinnedItems.filter(item => !item.isDirectory);
 
-  // 创建 URI 集合，用于去重
+  // 鍒涘缓 URI 闆嗗悎锛岀敤浜庡幓閲?
   const openFileUris = new Set<string>();
   openFiles.forEach(f => openFileUris.add(f.uri.toString()));
 
-  // 转换为 QuickPickItem，并附加 URI（不显示路径）
+  // 杞崲涓?QuickPickItem锛屽苟闄勫姞 URI锛堜笉鏄剧ず璺緞锛?
   const items: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }> = [];
   
-  // 1. 先添加打开的文件
+  // 1. 鍏堟坊鍔犳墦寮€鐨勬枃浠?
   openFiles.forEach(file => {
     const isPinned = pinExManager.isPinned(file.uri);
     const item: vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean } = {
       label: `$(file) ${file.name}`,
-      description: file.isActive ? 'recently opened' : (isPinned ? '📌 pinned' : ''),
+      description: file.isActive ? 'recently opened' : (isPinned ? 'P pinned' : ''),
       uri: file.uri,
       isClass: false,
       buttons: [
@@ -5419,14 +5550,14 @@ async function showQuickOpenWindow(
     items.push(item);
   });
   
-  // 2. 再添加未打开的 PinEx 文件
+  // 2. 鍐嶆坊鍔犳湭鎵撳紑鐨?PinEx 鏂囦欢
   pinnedFiles.forEach(pinnedItem => {
     const uriStr = pinnedItem.uri.toString();
     if (!openFileUris.has(uriStr)) {
       const name = pinnedItem.uri.fsPath.split(/[\\/]/).pop() || uriStr;
       const item: vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean } = {
         label: `$(file) ${name}`,
-        description: '📌 pinned',
+        description: 'P pinned',
         uri: pinnedItem.uri,
         isClass: false,
         buttons: [
@@ -5440,31 +5571,31 @@ async function showQuickOpenWindow(
     }
   });
 
-  // 读取配置的最大显示项目数
+  // 璇诲彇閰嶇疆鐨勬渶澶ф樉绀洪」鐩暟
   const config = vscode.workspace.getConfiguration('cursorToolWindow');
   const maxItems = config.get<number>('quickOpen.maxItems', 50);
   
-  // 限制默认显示的项目数量（但保持所有项目用于搜索）
+  // 闄愬埗榛樿鏄剧ず鐨勯」鐩暟閲忥紙浣嗕繚鎸佹墍鏈夐」鐩敤浜庢悳绱級
   const displayItems = items.slice(0, Math.min(maxItems, items.length));
   
   quickPick.items = displayItems;
   if (displayItems.length > 0) {
-    quickPick.activeItems = [displayItems[0]]; // 默认选中第一个
+    quickPick.activeItems = [displayItems[0]]; // 榛樿閫変腑绗竴涓?
   }
 
   let searchCancellationToken: vscode.CancellationTokenSource | null = null;
   let searchDebounceTimer: NodeJS.Timeout | null = null;
 
-  // 监听输入变化，搜索工作区文件和类
+  // 鐩戝惉杈撳叆鍙樺寲锛屾悳绱㈠伐浣滃尯鏂囦欢鍜岀被
   quickPick.onDidChangeValue(async (value) => {
-    // 取消之前的搜索
+    // 鍙栨秷涔嬪墠鐨勬悳绱?
     if (searchCancellationToken) {
       searchCancellationToken.cancel();
       searchCancellationToken.dispose();
       searchCancellationToken = null;
     }
     
-    // 清除之前的防抖计时器
+    // 娓呴櫎涔嬪墠鐨勯槻鎶栬鏃跺櫒
     if (searchDebounceTimer) {
       clearTimeout(searchDebounceTimer);
       searchDebounceTimer = null;
@@ -5487,6 +5618,14 @@ async function showQuickOpenWindow(
       resultFilterMode = FILTER_CLASSES;
       query = '';
       updateQuickPickTitle();
+    } else if (query.startsWith('/m ') || query.startsWith('/fn ')) {
+      resultFilterMode = FILTER_FUNCTIONS;
+      query = query.startsWith('/m ') ? query.substring(3).trim() : query.substring(4).trim();
+      updateQuickPickTitle();
+    } else if (query === '/m' || query === '/fn') {
+      resultFilterMode = FILTER_FUNCTIONS;
+      query = '';
+      updateQuickPickTitle();
     } else if (query.startsWith('/a ')) {
       resultFilterMode = FILTER_ALL;
       query = query.substring(3).trim();
@@ -5498,7 +5637,7 @@ async function showQuickOpenWindow(
     }
     
     if (!query) {
-      // 无输入时显示打开的文件（限制数量）
+      // 鏃犺緭鍏ユ椂鏄剧ず鎵撳紑鐨勬枃浠讹紙闄愬埗鏁伴噺锛?
       const config = vscode.workspace.getConfiguration('cursorToolWindow');
       const maxItems = config.get<number>('quickOpen.maxItems', 50);
       const displayItems = items.slice(0, Math.min(maxItems, items.length));
@@ -5509,7 +5648,7 @@ async function showQuickOpenWindow(
       return;
     }
 
-    // 读取搜索配置
+    // 璇诲彇鎼滅储閰嶇疆
     const config = vscode.workspace.getConfiguration('cursorToolWindow');
     const searchMode = config.get<string>('search.mode', 'all');
     const searchFileExtensions = config.get<string[]>('search.fileExtensions', []);
@@ -5536,7 +5675,7 @@ async function showQuickOpenWindow(
       previewLines
     });
 
-    // 使用防抖延迟搜索
+    // 浣跨敤闃叉姈寤惰繜鎼滅储
     searchDebounceTimer = setTimeout(async () => {
       searchCancellationToken = new vscode.CancellationTokenSource();
       const token = searchCancellationToken.token;
@@ -5549,10 +5688,10 @@ async function showQuickOpenWindow(
         const contentResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; isContent?: boolean }> = [];
         const classResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }> = [];
 
-        // 构建文件搜索模式
+        // 鏋勫缓鏂囦欢鎼滅储妯″紡
         const includePattern = buildSearchIncludePattern(searchIncludeDirectories, searchFileExtensions);
 
-        // 构建排除模式
+        // 鏋勫缓鎺掗櫎妯″紡
         const excludePattern = searchExcludeDirectories.length > 0 
           ? `{${searchExcludeDirectories.join(',')}}` 
           : '**/node_modules/**';
@@ -5560,8 +5699,11 @@ async function showQuickOpenWindow(
         logQuickOpenDebug('patterns', { includePattern, excludePattern });
 
         const indexSnapshot = searchIndex.getSnapshot();
+        const shouldQueryFiles = shouldSearchFilesForFilterMode(searchMode, resultFilterMode);
+        const shouldQuerySymbols = shouldSearchSymbolsForFilterMode(searchMode, resultFilterMode);
+        const symbolKinds = getSymbolKindsForFilterMode(resultFilterMode);
         let candidateFiles: vscode.Uri[] = [];
-        if (!indexSnapshot.ready || indexSnapshot.fileCount === 0) {
+        if (shouldQueryFiles && (!indexSnapshot.ready || indexSnapshot.fileCount === 0)) {
           candidateFiles = dedupeUris(await vscode.workspace.findFiles(
             includePattern,
             excludePattern,
@@ -5577,38 +5719,15 @@ async function showQuickOpenWindow(
           sample: candidateFiles.slice(0, 5).map(u => u.fsPath)
         });
 
-        if (shouldSearchContent(searchMode)) {
-          try {
-            const workspaceContentResults = await searchWorkspaceText(
-              query,
-              caseSensitive,
-              includePattern,
-              excludePattern,
-              maxContentMatches,
-              token,
-              pinExManager
-            );
-            contentResults.push(...workspaceContentResults);
-            logQuickOpenDebug('content-results', {
-              count: contentResults.length,
-              sample: contentResults.slice(0, 5).map(i => ({ label: i.label, file: i.uri?.fsPath, line: (i as any).line }))
-            });
-          } catch (contentErr) {
-            console.error('[CursorEx] QuickOpen content search error:', contentErr);
-            logQuickOpenDebug('content-results-error', {
-              message: contentErr instanceof Error ? contentErr.message : String(contentErr)
-            });
-          }
-        }
-
-        if (shouldSearchClasses(searchMode) && !token.isCancellationRequested) {
+        if (shouldQuerySymbols && !token.isCancellationRequested) {
           const canUseSymbolIndex = indexSnapshot.ready && indexSnapshot.symbolCount > 0;
           if (canUseSymbolIndex) {
             const indexedSymbols = await searchIndex.querySymbols(query, {
               limit: maxItems,
               includeExtensions: searchFileExtensions,
               includeDirectories: searchIncludeDirectories,
-              caseSensitive
+              caseSensitive,
+              includeSymbolKinds: symbolKinds
             });
 
             for (const symbol of indexedSymbols) {
@@ -5637,7 +5756,8 @@ async function showQuickOpenWindow(
               searchFileExtensions,
               searchIncludeDirectories,
               maxItems,
-              pinExManager
+              pinExManager,
+              symbolKinds
             );
             classResults.push(...workspaceClassResults);
           }
@@ -5649,8 +5769,8 @@ async function showQuickOpenWindow(
 
         if (token.isCancellationRequested) return;
 
-        // 1. 搜索文件名（如果搜索模式包含文件名）
-        if (shouldSearchFiles(searchMode)) {
+        // 1. 鎼滅储鏂囦欢鍚嶏紙濡傛灉鎼滅储妯″紡鍖呭惈鏂囦欢鍚嶏級
+        if (shouldQueryFiles) {
           const fuzzyMatches = indexSnapshot.ready && indexSnapshot.fileCount > 0
             ? (await searchIndex.queryFiles(query, {
                 limit: getSearchResultLimit(maxFilesToSearch) ?? maxItems * 10,
@@ -5695,7 +5815,7 @@ async function showQuickOpenWindow(
             
             fileResults.push({
               label: `$(file) ${name}`,
-              description: isOpen ? 'recently opened' : (isPinned ? '📌 pinned' : ''),
+              description: isOpen ? 'recently opened' : (isPinned ? 'P pinned' : ''),
               uri: uri,
               isClass: false,
               buttons: [
@@ -5713,14 +5833,39 @@ async function showQuickOpenWindow(
           });
         }
 
-        // 2. 搜索文件内容（如果搜索模式包含内容）
+        // 2. 鎼滅储鏂囦欢鍐呭锛堝鏋滄悳绱㈡ā寮忓寘鍚唴瀹癸級
+        if (shouldSearchContent(searchMode) && !token.isCancellationRequested) {
+          try {
+            const workspaceContentResults = await searchWorkspaceText(
+              query,
+              caseSensitive,
+              includePattern,
+              excludePattern,
+              maxFilesToSearch,
+              maxContentMatches,
+              token,
+              pinExManager
+            );
+            contentResults.push(...workspaceContentResults);
+            logQuickOpenDebug('content-results', {
+              count: contentResults.length,
+              sample: contentResults.slice(0, 5).map(i => ({ label: i.label, file: i.uri?.fsPath, line: (i as any).line }))
+            });
+          } catch (contentErr) {
+            console.error('[CursorEx] QuickOpen content search error:', contentErr);
+            logQuickOpenDebug('content-results-error', {
+              message: contentErr instanceof Error ? contentErr.message : String(contentErr)
+            });
+          }
+        }
+
         if (false && (searchMode === 'content' || searchMode === 'all')) {
           const filesToSearch = candidateFiles.filter(uri =>
             matchesSearchExtension(uri, searchFileExtensions) &&
             matchesSearchIncludeDirectories(uri, searchIncludeDirectories)
           );
 
-          // 在文件中搜索内容
+          // 鍦ㄦ枃浠朵腑鎼滅储鍐呭
           let contentMatchCount = 0;
           const queryToSearch = caseSensitive ? query : query.toLowerCase();
           
@@ -5730,7 +5875,7 @@ async function showQuickOpenWindow(
             try {
               const text = await readFileText(uri);
               
-              // 查找所有匹配
+              // 鏌ユ壘鎵€鏈夊尮閰?
               const lines = text.split('\n');
               
               for (let lineIndex = 0; lineIndex < lines.length && contentMatchCount < maxContentMatches; lineIndex++) {
@@ -5741,13 +5886,13 @@ async function showQuickOpenWindow(
                   const fileName = uri.fsPath.split(/[\\/]/).pop() || uri.toString();
                   const isPinned = pinExManager.isPinned(uri);
                   
-                  // 获取预览行
+                  // 鑾峰彇棰勮琛?
                   let previewText = line.trim();
                   if (previewText.length > 80) {
                     previewText = previewText.substring(0, 77) + '...';
                   }
                   
-                  // 检查是否已经有相同文件的相同行
+                  // 妫€鏌ユ槸鍚﹀凡缁忔湁鐩稿悓鏂囦欢鐨勭浉鍚岃
                   const existingIndex = contentResults.findIndex(r => 
                     r.uri?.toString() === uri.toString() && (r as any).line === lineIndex + 1
                   );
@@ -5755,7 +5900,7 @@ async function showQuickOpenWindow(
                   if (existingIndex === -1) {
                     contentResults.push({
                       label: `$(search) ${previewText}`,
-                      description: `${fileName}:${lineIndex + 1}${isPinned ? ' 📌' : ''}`,
+                      description: `${fileName}:${lineIndex + 1}${isPinned ? ' P' : ''}`,
                       detail: `Line ${lineIndex + 1}`,
                       uri: uri,
                       isClass: false,
@@ -5773,7 +5918,7 @@ async function showQuickOpenWindow(
                 }
               }
               
-              // 同时搜索类（符号）
+              // 鍚屾椂鎼滅储绫伙紙绗﹀彿锛?
               if (searchMode === 'all') {
                 const doc = await vscode.workspace.openTextDocument(uri);
                 const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
@@ -5788,7 +5933,7 @@ async function showQuickOpenWindow(
                       const fileName = uri.fsPath.split(/[\\/]/).pop() || uri.toString();
                       const isPinned = pinExManager.isPinned(uri);
                       
-                      // 检查是否已经存在
+                      // 妫€鏌ユ槸鍚﹀凡缁忓瓨鍦?
                       const existingClass = classResults.find(r => 
                         r.uri?.toString() === uri.toString() && r.label.includes(symbol.name)
                       );
@@ -5796,7 +5941,7 @@ async function showQuickOpenWindow(
                       if (!existingClass) {
                         classResults.push({
                           label: `$(symbol-class) ${symbol.name}`,
-                          description: `in ${fileName}${isPinned ? ' 📌 pinned' : ''}`,
+                          description: `in ${fileName}${isPinned ? ' P pinned' : ''}`,
                           uri: uri,
                           isClass: true,
                           line: symbol.range.start.line + 1,
@@ -5813,27 +5958,27 @@ async function showQuickOpenWindow(
                 }
               }
             } catch {
-              // 忽略无法读取的文件
+              // 蹇界暐鏃犳硶璇诲彇鐨勬枃浠?
             }
           }
         }
 
         if (token.isCancellationRequested) return;
 
-        // 按搜索模式合并结果，避免 Class Only 仍然混入文件结果
+        // 鎸夋悳绱㈡ā寮忓悎骞剁粨鏋滐紝閬垮厤 Class Only 浠嶇劧娣峰叆鏂囦欢缁撴灉
         const finalResults = searchMode === 'fileclass'
           ? [
-              ...(shouldSearchFiles(searchMode) ? fileResults : []),
-              ...(shouldSearchClasses(searchMode) ? classResults : []),
+              ...(shouldQueryFiles ? fileResults : []),
+              ...(shouldQuerySymbols ? classResults : []),
               ...(shouldSearchContent(searchMode) ? contentResults : [])
             ]
           : [
-              ...(shouldSearchClasses(searchMode) ? classResults : []),
-              ...(shouldSearchFiles(searchMode) ? fileResults : []),
+              ...(shouldQuerySymbols ? classResults : []),
+              ...(shouldQueryFiles ? fileResults : []),
               ...(shouldSearchContent(searchMode) ? contentResults : [])
             ];
         
-        // 去重（基于 URI + line）
+        // 鍘婚噸锛堝熀浜?URI + line锛?
         const seen = new Set<string>();
         const uniqueResults = finalResults.filter(item => {
           const key = `${item.uri?.toString() || ''}:${(item as any).line || 0}:${item.isClass || false}:${(item as any).symbolKind || ''}:${item.label}`;
@@ -5847,12 +5992,15 @@ async function showQuickOpenWindow(
             return !item.isClass && !(item as any).isContent;
           }
           if (resultFilterMode === FILTER_CLASSES) {
-            return !!item.isClass;
+            return !!item.isClass && !isFunctionSymbolKind((item as any).symbolKind);
+          }
+          if (resultFilterMode === FILTER_FUNCTIONS) {
+            return !!item.isClass && isFunctionSymbolKind((item as any).symbolKind);
           }
           return true;
         });
 
-        // 限制结果数量
+        // 闄愬埗缁撴灉鏁伴噺
         const limitedResults = filteredResults.slice(0, maxItems);
         const limitedDefaultItems = items.slice(0, Math.min(maxItems, items.length));
 
@@ -5861,7 +6009,16 @@ async function showQuickOpenWindow(
           unique: uniqueResults.length,
           filtered: filteredResults.length,
           limited: limitedResults.length,
-          sample: limitedResults.slice(0, 10).map(i => ({ label: i.label, file: i.uri?.fsPath, line: (i as any).line }))
+          filterMode: resultFilterMode,
+          sample: limitedResults.slice(0, 10).map(i => ({
+            label: i.label,
+            description: i.description,
+            file: i.uri?.fsPath,
+            line: (i as any).line,
+            isClass: (i as any).isClass,
+            isContent: (i as any).isContent,
+            symbolKind: (i as any).symbolKind
+          }))
         });
 
         quickPick.items = limitedResults.length > 0 ? limitedResults : limitedDefaultItems;
@@ -5874,6 +6031,7 @@ async function showQuickOpenWindow(
         }
       } catch (err) {
         quickPick.busy = false;
+        logQuickOpenDebug('search-error', err);
         if (err instanceof Error && err.name !== 'Canceled') {
           console.error('[CursorEx] QuickOpen search error:', err);
         }
@@ -5881,7 +6039,7 @@ async function showQuickOpenWindow(
     }, debounceDelay);
   });
 
-  // 处理按钮点击（Pin/Unpin）
+  // 澶勭悊鎸夐挳鐐瑰嚮锛圥in/Unpin锛?
   quickPick.onDidTriggerButton(button => {
     if (button === filterButtons[0]) {
       resultFilterMode = FILTER_ALL;
@@ -5889,6 +6047,8 @@ async function showQuickOpenWindow(
       resultFilterMode = FILTER_FILES;
     } else if (button === filterButtons[2]) {
       resultFilterMode = FILTER_CLASSES;
+    } else if (button === filterButtons[3]) {
+      resultFilterMode = FILTER_FUNCTIONS;
     }
 
     updateQuickPickTitle();
@@ -5902,7 +6062,7 @@ async function showQuickOpenWindow(
     }
   });
 
-  // 处理按钮点击（Pin/Unpin）
+  // 澶勭悊鎸夐挳鐐瑰嚮锛圥in/Unpin锛?
   quickPick.onDidTriggerItemButton(async (e) => {
     const item = e.item;
     const itemUri = item.uri;
@@ -5912,12 +6072,12 @@ async function showQuickOpenWindow(
     
     await pinExManager.togglePin(itemUri);
     
-    // 直接更新当前列表，不关闭窗口
+    // 鐩存帴鏇存柊褰撳墠鍒楄〃锛屼笉鍏抽棴绐楀彛
     const currentValue = quickPick.value;
     const isPinned = pinExManager.isPinned(itemUri);
     const itemUriStr = itemUri.toString();
     
-    // 更新当前项的按钮状态
+    // 鏇存柊褰撳墠椤圭殑鎸夐挳鐘舵€?
     const currentItems = quickPick.items;
     const updatedItems = currentItems.map(i => {
       const iUri = i.uri;
@@ -5926,16 +6086,16 @@ async function showQuickOpenWindow(
         const isActive = i.label.includes('$(circle-filled)');
         let newDescription = '';
         if (isClass) {
-          newDescription = (i.description || '').replace(/📌 pinned/g, '').trim();
+          newDescription = (i.description || '').replace(/P pinned/g, '').trim();
           if (isPinned) {
-            newDescription += ' 📌 pinned';
+            newDescription += ' P pinned';
           }
         } else {
           if (isActive) {
             newDescription = 'recently opened';
           }
           if (isPinned) {
-            newDescription += (newDescription ? ' ' : '') + '📌 pinned';
+            newDescription += (newDescription ? ' ' : '') + 'P pinned';
           }
         }
         
@@ -5955,15 +6115,15 @@ async function showQuickOpenWindow(
     
     quickPick.items = updatedItems;
     
-    // 如果有搜索值，重新触发搜索以更新列表
+    // 濡傛灉鏈夋悳绱㈠€硷紝閲嶆柊瑙﹀彂鎼滅储浠ユ洿鏂板垪琛?
     if (currentValue.trim()) {
-      // 触发搜索更新
-      quickPick.value = currentValue + ' '; // 添加空格触发更新
+      // 瑙﹀彂鎼滅储鏇存柊
+      quickPick.value = currentValue + ' '; // 娣诲姞绌烘牸瑙﹀彂鏇存柊
       setTimeout(() => {
-        quickPick.value = currentValue; // 恢复原值
+        quickPick.value = currentValue; // 鎭㈠鍘熷€?
       }, 10);
     } else {
-      // 无搜索时，重新构建默认列表
+      // 鏃犳悳绱㈡椂锛岄噸鏂版瀯寤洪粯璁ゅ垪琛?
       const openFiles = provider.getOpenFilesSorted();
       const pinnedItems = pinExManager.getItemsSortedByRecent();
       const pinnedFiles = pinnedItems.filter(pItem => !pItem.isDirectory);
@@ -5976,7 +6136,7 @@ async function showQuickOpenWindow(
         const isPinnedFile = pinExManager.isPinned(file.uri);
         newItems.push({
           label: `$(file) ${file.name}`,
-          description: file.isActive ? 'recently opened' : (isPinnedFile ? '📌 pinned' : ''),
+          description: file.isActive ? 'recently opened' : (isPinnedFile ? 'P pinned' : ''),
           uri: file.uri,
           isClass: false,
           buttons: [
@@ -5994,7 +6154,7 @@ async function showQuickOpenWindow(
           const name = pinnedItem.uri.fsPath.split(/[\\/]/).pop() || uriStr;
           newItems.push({
             label: `$(file) ${name}`,
-            description: '📌 pinned',
+            description: 'P pinned',
             uri: pinnedItem.uri,
             isClass: false,
             buttons: [
@@ -6018,51 +6178,62 @@ async function showQuickOpenWindow(
     }
   });
 
-  // 处理选择
+  // 澶勭悊閫夋嫨
   quickPick.onDidAccept(async () => {
     const selected = quickPick.selectedItems[0];
     if (!selected || !selected.uri) {
+      logQuickOpenDebug('accept-empty');
       return;
     }
 
     const targetUri = selected.uri;
+    logQuickOpenDebug('accept-item', {
+      label: selected.label,
+      description: selected.description,
+      uri: targetUri.fsPath,
+      line: (selected as any).line,
+      isClass: (selected as any).isClass,
+      isContent: (selected as any).isContent,
+      symbolKind: (selected as any).symbolKind
+    });
 
-    // 更新 MRU
+    // 鏇存柊 MRU
     provider.noteOpenFileRecentlyUsed(targetUri);
     
-    // 打开文件
+    // 鎵撳紑鏂囦欢
     try {
       const doc = await vscode.workspace.openTextDocument(targetUri);
       const editor = await vscode.window.showTextDocument(doc, { preview: false });
       
-      // 获取行号（类、内容搜索结果都可能有行号）
+      // 鑾峰彇琛屽彿锛堢被銆佸唴瀹规悳绱㈢粨鏋滈兘鍙兘鏈夎鍙凤級
       let targetLine: number | undefined;
       
-      // 优先使用直接存储的 line 属性
+      // 浼樺厛浣跨敤鐩存帴瀛樺偍鐨?line 灞炴€?
       if (typeof (selected as any).line === 'number') {
-        targetLine = (selected as any).line - 1; // 转换为 0-based
+        targetLine = (selected as any).line - 1; // 杞崲涓?0-based
       } else if ((selected as any).detail) {
-        // 从 detail 中解析行号
+        // 浠?detail 涓В鏋愯鍙?
         const lineMatch = (selected as any).detail.match(/Line (\d+)/);
         if (lineMatch) {
           targetLine = parseInt(lineMatch[1], 10) - 1;
         }
       }
       
-      // 跳转到指定行
+      // 璺宠浆鍒版寚瀹氳
       if (typeof targetLine === 'number' && targetLine >= 0) {
         const position = new vscode.Position(targetLine, 0);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      logQuickOpenDebug('accept-error', err);
     }
 
     quickPick.dispose();
   });
 
   quickPick.onDidHide(() => {
+    logQuickOpenDebug('quickpick-hide');
     if (searchCancellationToken) {
       searchCancellationToken.cancel();
       searchCancellationToken.dispose();
@@ -6075,17 +6246,17 @@ async function showQuickOpenWindow(
     quickOpenContext = undefined;
   });
 
-  // 尝试通过设置更多项目来增加默认高度
-  // VS Code 的 QuickPick 会根据项目数量自动调整高度
-  // 我们可以通过增加默认显示的项目数量来让窗口更高
-  // 但 QuickPick 本身不支持自定义高度，所以这里我们保持原有逻辑
-  // 如果用户需要更大的窗口，可以通过搜索来显示更多结果
+  // 灏濊瘯閫氳繃璁剧疆鏇村椤圭洰鏉ュ鍔犻粯璁ら珮搴?
+  // VS Code 鐨?QuickPick 浼氭牴鎹」鐩暟閲忚嚜鍔ㄨ皟鏁撮珮搴?
+  // 鎴戜滑鍙互閫氳繃澧炲姞榛樿鏄剧ず鐨勯」鐩暟閲忔潵璁╃獥鍙ｆ洿楂?
+  // 浣?QuickPick 鏈韩涓嶆敮鎸佽嚜瀹氫箟楂樺害锛屾墍浠ヨ繖閲屾垜浠繚鎸佸師鏈夐€昏緫
+  // 濡傛灉鐢ㄦ埛闇€瑕佹洿澶х殑绐楀彛锛屽彲浠ラ€氳繃鎼滅储鏉ユ樉绀烘洿澶氱粨鏋?
 
   quickPick.show();
 }
 
 export function deactivate() {
-  // 無需特殊清理
+  // 鐒￠渶鐗规畩娓呯悊
 }
 
 async function revealTodoLocation(uri: vscode.Uri, line: number): Promise<void> {
@@ -6116,14 +6287,14 @@ async function revealReferenceLocation(uri: vscode.Uri, line: number, character:
 
 async function revealPinExFile(uri: vscode.Uri): Promise<void> {
   try {
-    // 检查文件是否是目录
+    // 妫€鏌ユ枃浠舵槸鍚︽槸鐩綍
     const stat = await vscode.workspace.fs.stat(uri);
     if ((stat.type & vscode.FileType.Directory) !== 0) {
-      // 如果是目录，在资源管理器中显示
+      // 濡傛灉鏄洰褰曪紝鍦ㄨ祫婧愮鐞嗗櫒涓樉绀?
       await vscode.commands.executeCommand('revealInExplorer', uri);
       return;
     }
-    // 打开文件，不改变光标位置（VS Code 会自动恢复上次位置）
+    // 鎵撳紑鏂囦欢锛屼笉鏀瑰彉鍏夋爣浣嶇疆锛圴S Code 浼氳嚜鍔ㄦ仮澶嶄笂娆′綅缃級
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, { preview: false });
   } catch {
@@ -6186,7 +6357,7 @@ function getWebviewContent(version: string): string {
       color: var(--fg);
       box-sizing: border-box;
     }
-    /* 滚动条：默认隐藏；仅当前滚动区域(容器)激活时显示 */
+    /* 婊氬姩鏉★細榛樿闅愯棌锛涗粎褰撳墠婊氬姩鍖哄煙(瀹瑰櫒)婵€娲绘椂鏄剧ず */
     .scroll-area {
       scrollbar-width: none; /* Firefox */
     }
@@ -6631,7 +6802,7 @@ function getWebviewContent(version: string): string {
       border-bottom: 1px solid var(--border);
       color: rgba(243,243,243,0.94);
     }
-    /* 引用（References）面板样式 */
+    /* 寮曠敤锛圧eferences锛夐潰鏉挎牱寮?*/
     .refs-panel {
       display: flex;
       flex-direction: column;
@@ -6655,7 +6826,7 @@ function getWebviewContent(version: string): string {
     .refs-resizer:hover {
       background: var(--accent);
     }
-    /* 搜索中：在中间分隔条显示蓝色进度动画 */
+    /* 鎼滅储涓細鍦ㄤ腑闂村垎闅旀潯鏄剧ず钃濊壊杩涘害鍔ㄧ敾 */
     .refs-resizer.searching {
       position: relative;
       background: var(--border);
@@ -6755,7 +6926,7 @@ function getWebviewContent(version: string): string {
       color: #f48771;
     }
     .refs-session-pin {
-      /* 默认半透明（未固定） */
+      /* 榛樿鍗婇€忔槑锛堟湭鍥哄畾锛?*/
       opacity: 0.5;
       transition: opacity 0.15s, transform 0.15s, color 0.15s;
       transform: none;
@@ -6765,7 +6936,7 @@ function getWebviewContent(version: string): string {
       color: var(--accent);
     }
     .refs-session-pin.pinned {
-      /* 固定后：不透明 + 旋转角度参考 PinEx 固定图标 */
+      /* 鍥哄畾鍚庯細涓嶉€忔槑 + 鏃嬭浆瑙掑害鍙傝€?PinEx 鍥哄畾鍥炬爣 */
       opacity: 1;
       color: var(--accent);
       transform: rotate(-45deg);
@@ -6875,7 +7046,7 @@ function getWebviewContent(version: string): string {
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    /* 预览改为 VS Code 原生 Peek（不再用 Webview 浮层） */
+    /* 棰勮鏀逛负 VS Code 鍘熺敓 Peek锛堜笉鍐嶇敤 Webview 娴眰锛?*/
     .refs-toolbar-btn {
       width: 22px;
       height: 22px;
@@ -6975,12 +7146,23 @@ function getWebviewContent(version: string): string {
       font-family: Consolas, 'Courier New', monospace;
       font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.82);
     }
-    /* 符号面板样式 */
+    /* 绗﹀彿闈㈡澘鏍峰紡 */
     .symbol-panel {
       display: flex;
       flex-direction: column;
       height: 100%;
       font-size: var(--pinex-font-size);
+    }
+    .symbol-search-toolbar {
+      flex: 0 0 auto;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--border);
+      background: #1b1b1b;
+    }
+    .symbol-search-toolbar .search-input {
+      width: 100%;
+      height: 24px;
+      font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.86);
     }
     .symbol-class-list {
       flex: 0 0 auto;
@@ -7016,7 +7198,7 @@ function getWebviewContent(version: string): string {
       gap: 6px;
       padding: 4px 6px;
       margin: -4px -6px 2px -6px;
-      background: #1b1b1b; /* 与 section 背景一致，避免半透明造成“颜色不一致” */
+      background: #1b1b1b; /* 涓?section 鑳屾櫙涓€鑷达紝閬垮厤鍗婇€忔槑閫犳垚鈥滈鑹蹭笉涓€鑷粹€?*/
       border-bottom: 1px solid var(--border);
     }
     .symbol-member-toolbar-title {
@@ -7061,7 +7243,7 @@ function getWebviewContent(version: string): string {
       background: rgba(14,99,156,0.22);
       color: var(--fg);
     }
-    /* 成员筛选按钮：激活态按类型配色（与图标一致） */
+    /* 鎴愬憳绛涢€夋寜閽細婵€娲绘€佹寜绫诲瀷閰嶈壊锛堜笌鍥炬爣涓€鑷达級 */
     .symbol-filter-btn.filter-field.active {
       border-color: #c586c0;
       background: #c586c0;
@@ -7141,6 +7323,13 @@ function getWebviewContent(version: string): string {
     .symbol-type-prefix {
       color: var(--accent);
       opacity: 0.9;
+    }
+    .symbol-match {
+      color: #ffffff;
+      background: rgba(255, 193, 7, 0.42);
+      border-radius: 2px;
+      padding: 0 1px;
+      font-weight: 700;
     }
     .symbol-section-title {
       font-size: calc(var(--pinex-font-size, var(--font-size-base)) * 0.75);
@@ -7484,19 +7673,19 @@ function getWebviewContent(version: string): string {
     <div class="body scroll-area" id="body-root">
       <div class="section" id="todo-section">
         <div class="section-header" data-section="todo">
-          <span class="section-chevron">▼</span>
+          <span class="section-chevron">-</span>
           <span class="section-title">TODO</span>
-          <span class="scanning-indicator" id="todo-scanning" style="display:none;">⏳ Scanning...</span>
+          <span class="scanning-indicator" id="todo-scanning" style="display:none;">* Scanning...</span>
           <div class="todo-header-toolbar">
             <span class="search-wrapper">
             <input class="search-input" id="search-input" type="text" placeholder="Search TODO..." />
-              <span class="search-clear" id="search-clear-btn" title="Clear">×</span>
+              <span class="search-clear" id="search-clear-btn" title="Clear">x</span>
             </span>
             <button class="todo-toggle-files" id="toggle-files-btn">Hide</button>
           </div>
           <span class="section-actions">
-            <button class="section-move-btn" data-card="todo" data-move="up">↑</button>
-            <button class="section-move-btn" data-card="todo" data-move="down">↓</button>
+            <button class="section-move-btn" data-card="todo" data-move="up">鈫?/button>
+            <button class="section-move-btn" data-card="todo" data-move="down">鈫?/button>
           </span>
         </div>
         <div class="section-body">
@@ -7631,6 +7820,9 @@ function getWebviewContent(version: string): string {
             <div class="symbol-panel">
               <div class="symbol-class-list scroll-area" id="symbol-class-list"></div>
               <div class="symbol-resizer" id="symbol-resizer"></div>
+              <div class="symbol-search-toolbar">
+                <input class="search-input" id="symbol-search-input-inline" type="text" placeholder="Search members..." />
+              </div>
               <div class="symbol-member-list scroll-area" id="symbol-member-list"></div>
             </div>
           </div>
@@ -7666,6 +7858,43 @@ function getWebviewContent(version: string): string {
         return;
       }
 
+      function reportWebviewError(message, source, line, column, stack) {
+        try {
+          vscode.postMessage({
+            type: 'logWebviewError',
+            message: message ? String(message) : 'unknown',
+            source: source ? String(source) : '',
+            line: typeof line === 'number' ? line : 0,
+            column: typeof column === 'number' ? column : 0,
+            stack: stack ? String(stack) : ''
+          });
+        } catch (_) {
+          // ignore
+        }
+      }
+
+      window.addEventListener('error', function (event) {
+        var error = event && event.error ? event.error : null;
+        reportWebviewError(
+          event && event.message,
+          event && event.filename,
+          event && event.lineno,
+          event && event.colno,
+          error && error.stack
+        );
+      });
+
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && event.reason;
+        reportWebviewError(
+          reason && reason.message ? reason.message : reason,
+          'unhandledrejection',
+          0,
+          0,
+          reason && reason.stack
+        );
+      });
+
       function setAreaScrollbarVisible(el, visible) {
         if (!el || !el.classList) return;
         if (visible) {
@@ -7693,7 +7922,7 @@ function getWebviewContent(version: string): string {
         }, 220);
       }
 
-      // 默认隐藏：只在当前滚动区域被 hover/点击/聚焦时显示
+      // 榛樿闅愯棌锛氬彧鍦ㄥ綋鍓嶆粴鍔ㄥ尯鍩熻 hover/鐐瑰嚮/鑱氱劍鏃舵樉绀?
       var scrollAreas = [];
       try {
         scrollAreas = Array.prototype.slice.call(document.querySelectorAll('.scroll-area'));
@@ -7712,7 +7941,7 @@ function getWebviewContent(version: string): string {
         }, { passive: true });
       });
 
-      // 点击时仅点亮“目标所在”的滚动区域（而不是全局都显示）
+      // 鐐瑰嚮鏃朵粎鐐逛寒鈥滅洰鏍囨墍鍦ㄢ€濈殑婊氬姩鍖哄煙锛堣€屼笉鏄叏灞€閮芥樉绀猴級
       document.addEventListener('mousedown', function (e) {
         var t = e && e.target ? e.target : null;
         while (t && t !== document.body) {
@@ -7725,7 +7954,7 @@ function getWebviewContent(version: string): string {
         }
       }, true);
 
-      // Webview 失焦时全部隐藏
+      // Webview 澶辩劍鏃跺叏閮ㄩ殣钘?
       window.addEventListener('blur', function () {
         scrollAreas.forEach(function (el) { setAreaScrollbarVisible(el, false); });
       });
@@ -7772,6 +8001,7 @@ function getWebviewContent(version: string): string {
       var symbolClassListEl = document.getElementById('symbol-class-list');
       var symbolMemberListEl = document.getElementById('symbol-member-list');
       var symbolResizer = document.getElementById('symbol-resizer');
+      var symbolSearchInput = document.getElementById('symbol-search-input-inline');
       var pinExClearAllBtn = document.getElementById('pinex-clear-all-btn-inline') || document.getElementById('pinex-clear-all-btn');
       var pinExSearchClearBtn = document.getElementById('pinex-search-clear-btn-inline') || document.getElementById('pinex-search-clear-btn');
       var pinExSearchInput = document.getElementById('pinex-search-input-inline') || document.getElementById('pinex-search-input');
@@ -7811,7 +8041,7 @@ function getWebviewContent(version: string): string {
 
       setPinExBootStatus('boot: dom refs acquired');
 
-      /** 卡片定義表，用於描述所有通用卡片 */
+      /** 鍗＄墖瀹氱京琛紝鐢ㄦ柤鎻忚堪鎵€鏈夐€氱敤鍗＄墖 */
       var cardDefs = {
         pinex: { id: 'pinex', sectionId: 'pinex-section' }
       };
@@ -7841,6 +8071,7 @@ function getWebviewContent(version: string): string {
       var activeReferenceSessionId = null;
       var allSymbolClasses = [];
       var allSymbolMembers = [];
+      var symbolFilterText = '';
       var symbolFileUri = null;
       var symbolFileName = '';
       var symbolNotCs = false;
@@ -7854,9 +8085,9 @@ function getWebviewContent(version: string): string {
       var showFiles = true;
       var activeCommentKey = null;
       var symbolMemberFilters = { field: true, property: true, method: true };
-      var refsSessionHeight = 140; // References 顶部“会话列表”默认高度
-      var refsAccessFilter = 'all'; // all | read | write （仅字段查询时生效）
-      var refsMethodFilter = 'all'; // all | calls （仅方法引用时生效）
+      var refsSessionHeight = 140; // References 椤堕儴鈥滀細璇濆垪琛ㄢ€濋粯璁ら珮搴?
+      var refsAccessFilter = 'all'; // all | read | write 锛堜粎瀛楁鏌ヨ鏃剁敓鏁堬級
+      var refsMethodFilter = 'all'; // all | calls 锛堜粎鏂规硶寮曠敤鏃剁敓鏁堬級
       var refsSearching = false;
       var refsSelectedBySession = {};
       var refsVisibleCountBySession = {};
@@ -7873,11 +8104,11 @@ function getWebviewContent(version: string): string {
         pinExDebugBar.textContent = 'debug bootstrapped';
       }
 
-      // 安全地恢復狀態，如果出錯則使用默認值
+      // 瀹夊叏鍦版仮寰╃媭鎱嬶紝濡傛灉鍑洪尟鍓囦娇鐢ㄩ粯瑾嶅€?
       try {
         var state = (vscode.getState && vscode.getState()) || {};
         if (state && typeof state === 'object') {
-          // 通用結構優先
+          // 閫氱敤绲愭鍎厛
           if (state.cardCollapsed && typeof state.cardCollapsed === 'object') {
             for (var id in state.cardCollapsed) {
               if (typeof state.cardCollapsed[id] === 'boolean') {
@@ -7906,12 +8137,12 @@ function getWebviewContent(version: string): string {
             });
             cardOrder = nextOrder;
           } else if (typeof state.todoOnTop === 'boolean') {
-            // 舊版本狀態遷移：todoOnTop + 固定 COMMENT + 新增 PinEx 卡片
+            // 鑸婄増鏈媭鎱嬮伔绉伙細todoOnTop + 鍥哄畾 COMMENT + 鏂板 PinEx 鍗＄墖
             cardOrder = state.todoOnTop
               ? ['todo', 'note', 'pinex']
               : ['note', 'todo', 'pinex'];
           }
-          // 舊字段遷移：折疊狀態與高度
+          // 鑸婂瓧娈甸伔绉伙細鎶樼枈鐙€鎱嬭垏楂樺害
       if (typeof state.collapsedTodo === 'boolean') {
             cardCollapsed.todo = state.collapsedTodo;
       }
@@ -7973,6 +8204,12 @@ function getWebviewContent(version: string): string {
           symbolMemberFilters.method = state.symbolMemberFilters.method;
         }
       }
+      if (typeof state.symbolFilterText === 'string') {
+        symbolFilterText = state.symbolFilterText;
+        if (symbolSearchInput) {
+          symbolSearchInput.value = symbolFilterText;
+        }
+      }
         }
       } catch (e) {
         console.error('Failed to restore state, using defaults:', e);
@@ -7987,7 +8224,7 @@ function getWebviewContent(version: string): string {
 
       setPinExBootStatus('boot: state restored');
 
-      // 為所有已知卡片補齊默認折疊狀態與高度，避免新增卡片時到處改初始化代碼
+      // 鐐烘墍鏈夊凡鐭ュ崱鐗囪榻婇粯瑾嶆姌鐤婄媭鎱嬭垏楂樺害锛岄伩鍏嶆柊澧炲崱鐗囨檪鍒拌檿鏀瑰垵濮嬪寲浠ｇ⒓
       cardIds.forEach(function (id) {
         if (typeof cardCollapsed[id] !== 'boolean') {
           cardCollapsed[id] = false;
@@ -7997,7 +8234,7 @@ function getWebviewContent(version: string): string {
         }
       });
 
-      // 確保 cardOrder 是有效的數組且包含所有卡片
+      // 纰轰繚 cardOrder 鏄湁鏁堢殑鏁哥祫涓斿寘鍚墍鏈夊崱鐗?
       if (!Array.isArray(cardOrder) || cardOrder.length !== cardIds.length) {
         cardOrder = cardIds.slice();
       }
@@ -8011,6 +8248,7 @@ function getWebviewContent(version: string): string {
 	          showFiles: showFiles,
 	          showSvnUnversioned: showSvnUnversioned,
 	          symbolMemberFilters: symbolMemberFilters,
+          symbolFilterText: symbolFilterText,
           refsSessionHeight: refsSessionHeight,
           activeReferenceSessionId: activeReferenceSessionId,
           refsAccessFilter: refsAccessFilter,
@@ -8139,12 +8377,12 @@ function getWebviewContent(version: string): string {
         var keyword = filterText.trim().toLowerCase();
         var cfKeyword = (todoContentFilter || '').trim().toLowerCase();
         
-        // 先應用配置的內容過濾器
+        // 鍏堟噳鐢ㄩ厤缃殑鍏у閬庢烤鍣?
         var baseList = cfKeyword
           ? allTodos.filter(function(t) { return t.text.toLowerCase().indexOf(cfKeyword) >= 0; })
           : allTodos.slice();
         
-        // 再應用搜索框的過濾
+        // 鍐嶆噳鐢ㄦ悳绱㈡鐨勯亷婵?
         var visible = keyword
           ? baseList.filter(function(t) { return t.text.toLowerCase().indexOf(keyword) >= 0 || t.file.toLowerCase().indexOf(keyword) >= 0; })
           : baseList;
@@ -8232,7 +8470,7 @@ function getWebviewContent(version: string): string {
           });
         }
 
-        // TODO 內容變更後，根據實際內容高度自動調整卡片高度與佈局
+        // TODO 鍏у璁婃洿寰岋紝鏍规摎瀵﹂殯鍏у楂樺害鑷嫊瑾挎暣鍗＄墖楂樺害鑸囦綀灞€
         syncHeightsFromContent();
       }
 
@@ -8293,7 +8531,7 @@ function getWebviewContent(version: string): string {
           lineSpan.textContent = 'Ln ' + (c.line + 1);
 
           var textSpan = document.createElement('span');
-          // 只顯示文件名，不顯示完整路徑
+          // 鍙’绀烘枃浠跺悕锛屼笉椤ず瀹屾暣璺緫
           var fileName = c.file || '';
           var normalizedPath = fileName.replace(/\\\\/g, '/');
           var lastSlash = normalizedPath.lastIndexOf('/');
@@ -8302,7 +8540,7 @@ function getWebviewContent(version: string): string {
 
           var delSpan = document.createElement('span');
           delSpan.className = 'comment-delete';
-          delSpan.textContent = '×';
+          delSpan.textContent = 'x';
           delSpan.title = 'Delete this comment';
 
           item.title = (c.file || c.uri) + '  Ln ' + (c.line + 1) + '  ' + c.text;
@@ -8323,7 +8561,7 @@ function getWebviewContent(version: string): string {
           commentListEl.appendChild(item);
         });
 
-        // 列表內容變更後，同步卡片高度
+        // 鍒楄〃鍏у璁婃洿寰岋紝鍚屾鍗＄墖楂樺害
         syncHeightsFromContent();
 
         if (activeEl && typeof activeEl.scrollIntoView === 'function') {
@@ -8359,17 +8597,17 @@ function getWebviewContent(version: string): string {
           if (!key || !Object.prototype.hasOwnProperty.call(cardCollapsed, key)) {
             return;
           }
-          chevron.textContent = cardCollapsed[key] ? '▶' : '▼';
+          chevron.textContent = cardCollapsed[key] ? '+' : '-';
         });
 
-        // 折疊 / 展開 之後，同步重新計算懸浮卡片高度與位置
+        // 鎶樼枈 / 灞曢枊 涔嬪緦锛屽悓姝ラ噸鏂拌▓绠楁嚫娴崱鐗囬珮搴﹁垏浣嶇疆
         applyHeights();
       }
 
       window.addEventListener('message', function (event) {
         var message = event.data;
         if (!message || typeof message.type !== 'string') return;
-        // 通用消息日志
+        // 閫氱敤娑堟伅鏃ュ織
         if (message.type !== 'todos' && message.type !== 'comments' && message.type !== 'pinExItems' && message.type !== 'openFiles') {
           console.log('[CursorEx-WV] Received message type:', message.type);
         }
@@ -8393,8 +8631,8 @@ function getWebviewContent(version: string): string {
           allPinEx = message.items;
           pinExItemsInitialized = true;
           renderPinEx();
-          renderOpenFiles(); // 更新打開文件列表的固定狀態
-          // 如果有待处理的定位请求，PinEx 数据到达后再尝试一次
+          renderOpenFiles(); // 鏇存柊鎵撻枊鏂囦欢鍒楄〃鐨勫浐瀹氱媭鎱?
+          // 濡傛灉鏈夊緟澶勭悊鐨勫畾浣嶈姹傦紝PinEx 鏁版嵁鍒拌揪鍚庡啀灏濊瘯涓€娆?
           if (pinExLocatePending) {
             setTimeout(function () { tryLocateActivePinEx(); }, 60);
           }
@@ -8432,7 +8670,7 @@ function getWebviewContent(version: string): string {
           if (message.pinexHoverColor) {
             document.documentElement.style.setProperty('--pinex-hover', message.pinexHoverColor);
           }
-          // 面板独立字体大小（0 表示使用全局设置）
+          // 闈㈡澘鐙珛瀛椾綋澶у皬锛? 琛ㄧず浣跨敤鍏ㄥ眬璁剧疆锛?
           if (typeof message.todoFontSize === 'number' && message.todoFontSize > 0) {
             document.documentElement.style.setProperty('--todo-font-size', message.todoFontSize + 'px');
           } else {
@@ -8461,7 +8699,7 @@ function getWebviewContent(version: string): string {
         } else if (message.type === 'activeFileChanged') {
           activePinExUri = message.uri || null;
           highlightActivePinEx();
-          // 如果当前是符号 Tab，自动刷新符号数据
+          // 濡傛灉褰撳墠鏄鍙?Tab锛岃嚜鍔ㄥ埛鏂扮鍙锋暟鎹?
           if (pinExActiveTab === 'symbol') {
             vscode.postMessage({ type: 'getSymbols' });
           }
@@ -8473,7 +8711,7 @@ function getWebviewContent(version: string): string {
           && Array.isArray(message.items)) {
           pinExDirChildren[message.uri] = message.items;
           pinExDirExpanded[message.uri] = true;
-          // 若處於「全部展開」模式，對新獲取的子目錄繼續遞歸展開
+          // 鑻ヨ檿鏂笺€屽叏閮ㄥ睍闁嬨€嶆ā寮忥紝灏嶆柊鐛插彇鐨勫瓙鐩寗绻肩簩閬炴灞曢枊
           if (pinExExpandAllRequested) {
             message.items.forEach(function (c) {
               if (c && c.isDirectory) {
@@ -8482,12 +8720,12 @@ function getWebviewContent(version: string): string {
             });
           }
           renderPinEx();
-          // 如果正在進行定位操作，繼續嘗試定位
+          // 濡傛灉姝ｅ湪閫茶瀹氫綅鎿嶄綔锛岀辜绾屽槜瑭﹀畾浣?
           if (pinExLocatePending) {
             setTimeout(function() { tryLocateActivePinEx(); }, 50);
           }
         } else if (message.type === 'pinExFsChanged') {
-          // 工程文件系統變更時，對所有已展開的目錄重新請求子項
+          // 宸ョ▼鏂囦欢绯荤当璁婃洿鏅傦紝灏嶆墍鏈夊凡灞曢枊鐨勭洰閷勯噸鏂拌珛姹傚瓙闋?
           Object.keys(pinExDirExpanded).forEach(function (uri) {
             if (pinExDirExpanded[uri]) {
               vscode.postMessage({ type: 'listPinExDir', uri: uri });
@@ -8523,14 +8761,14 @@ function getWebviewContent(version: string): string {
         } else if (message.type === 'switchPinExTab' && typeof message.tab === 'string') {
           switchPinExTab(message.tab);
         } else if (message.type === 'pinExLocateToUri' && typeof message.uri === 'string') {
-          // 外部命令：跳转到固定窗口后，让 PinEx 面板定位到指定文件
+          // 澶栭儴鍛戒护锛氳烦杞埌鍥哄畾绐楀彛鍚庯紝璁?PinEx 闈㈡澘瀹氫綅鍒版寚瀹氭枃浠?
           pinExLocatePending = true;
           pinExLocateTargetUri = message.uri;
-          // 统一在“固定”Tab 内定位
+          // 缁熶竴鍦ㄢ€滃浐瀹氣€漈ab 鍐呭畾浣?
           if (pinExActiveTab !== 'pin') {
             switchPinExTab('pin');
           }
-          // 等待首次 PinEx 数据到达后再执行（避免初始化阶段直接清空 pending）
+          // 绛夊緟棣栨 PinEx 鏁版嵁鍒拌揪鍚庡啀鎵ц锛堥伩鍏嶅垵濮嬪寲闃舵鐩存帴娓呯┖ pending锛?
           if (!pinExItemsInitialized) {
             return;
           }
@@ -8544,7 +8782,7 @@ function getWebviewContent(version: string): string {
           symbolNotCs = message.notCs || false;
           allSymbolClasses = message.classes || [];
           allSymbolMembers = message.members || [];
-          // 如果之前选中的类不在新列表中，重置
+          // 濡傛灉涔嬪墠閫変腑鐨勭被涓嶅湪鏂板垪琛ㄤ腑锛岄噸缃?
           if (selectedSymbolClass) {
             var found = false;
             for (var i = 0; i < allSymbolClasses.length; i++) {
@@ -8557,7 +8795,7 @@ function getWebviewContent(version: string): string {
               selectedSymbolClass = null;
             }
           }
-          // 默认选中第一个类
+          // 榛樿閫変腑绗竴涓被
           if (!selectedSymbolClass && allSymbolClasses.length > 0) {
             selectedSymbolClass = allSymbolClasses[0].name;
           }
@@ -8568,7 +8806,7 @@ function getWebviewContent(version: string): string {
             var cursorUri = message.uri;
             var uriMatch = cursorUri === symbolFileUri;
             console.log('[CursorEx-WV] cursorLine: L=' + cursorLine + ' match=' + uriMatch + ' tab=' + pinExActiveTab + ' cls=' + allSymbolClasses.length);
-            // 只有当前文件与符号数据文件匹配时才定位
+            // 鍙湁褰撳墠鏂囦欢涓庣鍙锋暟鎹枃浠跺尮閰嶆椂鎵嶅畾浣?
             if (typeof cursorLine === 'number' && uriMatch && pinExActiveTab === 'symbol' && allSymbolClasses.length > 0) {
               console.log('[CursorEx-WV] Locating...');
               locateSymbolByLine(cursorLine);
@@ -8582,7 +8820,7 @@ function getWebviewContent(version: string): string {
           } else {
             activeCommentKey = null;
           }
-          // 若 COMMENT 區塊處於收起狀態，為了能看到高亮項，自動展開
+          // 鑻?COMMENT 鍗€濉婅檿鏂兼敹璧风媭鎱嬶紝鐐轰簡鑳界湅鍒伴珮浜爡锛岃嚜鍕曞睍闁?
           if (cardCollapsed.note) {
             cardCollapsed.note = false;
             applySectionCollapse();
@@ -8746,14 +8984,14 @@ function getWebviewContent(version: string): string {
       if (pinExSearchInput) {
         pinExSearchInput.addEventListener('input', function () {
           pinExFilterText = (pinExSearchInput.value || '').trim();
-          // 如果在固定 Tab 且有搜索关键字，自动加载所有目录的子项
+          // 濡傛灉鍦ㄥ浐瀹?Tab 涓旀湁鎼滅储鍏抽敭瀛楋紝鑷姩鍔犺浇鎵€鏈夌洰褰曠殑瀛愰」
           if (pinExFilterText && pinExActiveTab === 'pin') {
             var dirs = allPinEx.filter(function (x) { return !!x.isDirectory; });
             dirs.forEach(function (d) {
               expandPinExDirRecursive(d.uri);
             });
           }
-          // 根據當前 Tab 渲染
+          // 鏍规摎鐣跺墠 Tab 娓叉煋
           if (pinExActiveTab === 'pin') {
             renderPinEx();
           } else {
@@ -8769,7 +9007,14 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // 清空搜索按钮事件
+      // 娓呯┖鎼滅储鎸夐挳浜嬩欢
+      if (symbolSearchInput) {
+        symbolSearchInput.addEventListener('input', function () {
+          symbolFilterText = (symbolSearchInput.value || '').trim();
+          persistState();
+          renderSymbols();
+        });
+      }
       if (searchClearBtn && searchInput) {
         searchClearBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
@@ -8816,10 +9061,10 @@ function getWebviewContent(version: string): string {
           if (!allComments.length) {
             return;
           }
-          // 直接清空所有行級注釋（不再使用瀏覽器 confirm，避免在部分環境中被攔截）
-          // 通知擴展端清理所有注釋
+          // 鐩存帴娓呯┖鎵€鏈夎绱氭敞閲嬶紙涓嶅啀浣跨敤鐎忚鍣?confirm锛岄伩鍏嶅湪閮ㄥ垎鐠板涓鏀旀埅锛?
+          // 閫氱煡鎿村睍绔竻鐞嗘墍鏈夋敞閲?
           vscode.postMessage({ type: 'deleteAllComments' });
-          // 同步更新前端狀態，立即反映到 UI
+          // 鍚屾鏇存柊鍓嶇鐙€鎱嬶紝绔嬪嵆鍙嶆槧鍒?UI
           allComments = [];
           activeCommentKey = null;
           renderComments();
@@ -8827,7 +9072,7 @@ function getWebviewContent(version: string): string {
       }
 
       function highlightActivePinEx() {
-        // 高亮固定列表中的活動文件
+        // 楂樹寒鍥哄畾鍒楄〃涓殑娲诲嫊鏂囦欢
         if (pinExListEl) {
           var allItems = pinExListEl.querySelectorAll('.pinex-item, .pinex-dir-header');
           for (var i = 0; i < allItems.length; i++) {
@@ -8844,7 +9089,7 @@ function getWebviewContent(version: string): string {
             }
           }
         }
-        // 高亮打開文件列表中的活動文件
+        // 楂樹寒鎵撻枊鏂囦欢鍒楄〃涓殑娲诲嫊鏂囦欢
         if (pinExOpenListEl) {
           var openItems = pinExOpenListEl.querySelectorAll('.pinex-item');
           for (var k = 0; k < openItems.length; k++) {
@@ -8875,13 +9120,13 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 檢查文件是否匹配後綴筛选（提前定義，供後續使用）
+        // 妾㈡煡鏂囦欢鏄惁鍖归厤寰岀洞绛涢€夛紙鎻愬墠瀹氱京锛屼緵寰岀簩浣跨敤锛?
         function matchesExtFilter(node) {
           if (!pinExFileExtensions || pinExFileExtensions.length === 0) {
-            return true; // 沒有筛选，顯示全部
+            return true; // 娌掓湁绛涢€夛紝椤ず鍏ㄩ儴
           }
           if (node.isDirectory) {
-            return true; // 目錄總是顯示
+            return true; // 鐩寗绺芥槸椤ず
           }
           var filePath = (node.file || node.uri || '').toLowerCase();
           for (var i = 0; i < pinExFileExtensions.length; i++) {
@@ -8896,7 +9141,7 @@ function getWebviewContent(version: string): string {
           return false;
         }
 
-        // items 已在扩展端按“最近打开/编辑”排序，这里保持顺序
+        // items 宸插湪鎵╁睍绔寜鈥滄渶杩戞墦寮€/缂栬緫鈥濇帓搴忥紝杩欓噷淇濇寔椤哄簭
         var items = allPinEx.slice();
 
         var keyword = (pinExFilterText || '').trim().toLowerCase();
@@ -8910,11 +9155,11 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 若有搜索關鍵字，搜索所有項目（包括目錄中的子文件）
+        // 鑻ユ湁鎼滅储闂滈嵉瀛楋紝鎼滅储鎵€鏈夐爡鐩紙鍖呮嫭鐩寗涓殑瀛愭枃浠讹級
         if (keyword) {
-          // 收集所有可搜索的項目：顶层项目 + 已加载的目录子项
+          // 鏀堕泦鎵€鏈夊彲鎼滅储鐨勯爡鐩細椤跺眰椤圭洰 + 宸插姞杞界殑鐩綍瀛愰」
           var allSearchable = items.slice();
-          // 遞歸收集所有已加載的子項
+          // 閬炴鏀堕泦鎵€鏈夊凡鍔犺級鐨勫瓙闋?
           function collectChildren(parentUri) {
             var children = pinExDirChildren[parentUri];
             if (Array.isArray(children)) {
@@ -8961,13 +9206,13 @@ function getWebviewContent(version: string): string {
           item.className = 'pinex-item';
           item.setAttribute('data-uri', node.uri);
 
-          // 检查是否是当前活动文件
+          // 妫€鏌ユ槸鍚︽槸褰撳墠娲诲姩鏂囦欢
           if (activePinExUri && node.uri === activePinExUri) {
             item.classList.add('active');
           }
 
           var textSpan = document.createElement('span');
-          // 統一只顯示文件名，不顯示完整路徑
+          // 绲变竴鍙’绀烘枃浠跺悕锛屼笉椤ず瀹屾暣璺緫
           var fullPath = node.file || node.uri;
           var normalizedPath = String(fullPath).replace(/\\\\/g, '/');
           var lastSlash = normalizedPath.lastIndexOf('/');
@@ -8980,7 +9225,7 @@ function getWebviewContent(version: string): string {
           if (canDelete) {
             var delSpan = document.createElement('span');
             delSpan.className = 'comment-delete pinex-unpin';
-            delSpan.textContent = '📌';
+            delSpan.textContent = 'P';
             delSpan.title = 'Unpin';
             item.appendChild(delSpan);
 
@@ -8997,7 +9242,7 @@ function getWebviewContent(version: string): string {
           parent.appendChild(item);
         }
 
-        // 獲取目錄的最後一段名稱（basename）
+        // 鐛插彇鐩寗鐨勬渶寰屼竴娈靛悕绋憋紙basename锛?
         function getDirBasename(node) {
           var full = (node && (node.file || node.uri)) || '';
           full = String(full).replace(/\\\\/g, '/');
@@ -9005,8 +9250,8 @@ function getWebviewContent(version: string): string {
           return idx >= 0 ? full.substring(idx + 1) : full;
         }
 
-        // Compact Folders: 如果目錄下只有一個子目錄（沒有文件），合併顯示
-        // 返回 { label, finalNode, chainUris }
+        // Compact Folders: 濡傛灉鐩寗涓嬪彧鏈変竴鍊嬪瓙鐩寗锛堟矑鏈夋枃浠讹級锛屽悎浣甸’绀?
+        // 杩斿洖 { label, finalNode, chainUris }
         function getCompactedDir(node) {
           var label = getDirBasename(node);
           var chainUris = [node.uri];
@@ -9015,13 +9260,13 @@ function getWebviewContent(version: string): string {
           while (true) {
             var children = pinExDirChildren[current.uri];
             if (!children || !Array.isArray(children)) {
-              // 子項尚未載入，無法壓縮
+              // 瀛愰爡灏氭湭杓夊叆锛岀劇娉曞绺?
               break;
             }
             var childDirs = children.filter(function (c) { return !!c.isDirectory; });
             var childFiles = children.filter(function (c) { return !c.isDirectory; });
             if (childDirs.length === 1 && childFiles.length === 0) {
-              // 只有一個子目錄，合併
+              // 鍙湁涓€鍊嬪瓙鐩寗锛屽悎浣?
               var onlyChild = childDirs[0];
               label = label + ' / ' + getDirBasename(onlyChild);
               chainUris.push(onlyChild.uri);
@@ -9053,7 +9298,7 @@ function getWebviewContent(version: string): string {
         }
 
         function renderDirNode(node, parent, canDelete) {
-          // 計算壓縮後的目錄信息
+          // 瑷堢畻澹撶府寰岀殑鐩寗淇℃伅
           var compacted = getCompactedDir(node);
           var displayLabel = compacted.label;
           var finalNode = compacted.finalNode;
@@ -9067,8 +9312,8 @@ function getWebviewContent(version: string): string {
 
           var chevron = document.createElement('span');
           chevron.className = 'pinex-dir-chevron';
-          // 以最終節點的展開狀態為準
-          chevron.textContent = pinExDirExpanded[finalNode.uri] ? '▼' : '▶';
+          // 浠ユ渶绲傜瘈榛炵殑灞曢枊鐙€鎱嬬偤婧?
+          chevron.textContent = pinExDirExpanded[finalNode.uri] ? '-' : '+';
 
           var textSpan = document.createElement('span');
           textSpan.className = 'pinex-dir-label';
@@ -9083,13 +9328,13 @@ function getWebviewContent(version: string): string {
           if (canDelete) {
             delSpan = document.createElement('span');
             delSpan.className = 'comment-delete pinex-unpin';
-            delSpan.textContent = '📌';
+            delSpan.textContent = 'P';
             delSpan.title = 'Unpin';
             header.appendChild(delSpan);
 
             delSpan.addEventListener('click', function (ev) {
               ev.stopPropagation();
-              // 刪除時用原始節點的 uri
+              // 鍒櫎鏅傜敤鍘熷绡€榛炵殑 uri
               vscode.postMessage({ type: 'deletePinEx', uri: node.uri });
             });
           }
@@ -9097,7 +9342,7 @@ function getWebviewContent(version: string): string {
           var childrenWrap = document.createElement('div');
           childrenWrap.className = 'pinex-dir-children';
 
-          // 以最終節點的展開狀態渲染子項
+          // 浠ユ渶绲傜瘈榛炵殑灞曢枊鐙€鎱嬫覆鏌撳瓙闋?
           if (pinExDirExpanded[finalNode.uri]) {
             renderDirChildren(finalNode.uri, childrenWrap);
           } else {
@@ -9110,13 +9355,13 @@ function getWebviewContent(version: string): string {
             }
             var expanded = !!pinExDirExpanded[finalNode.uri];
             if (!expanded) {
-              // 展開時，把鏈上所有目錄都標記為展開，並請求最終節點的子項
+              // 灞曢枊鏅傦紝鎶婇張涓婃墍鏈夌洰閷勯兘妯欒鐐哄睍闁嬶紝涓﹁珛姹傛渶绲傜瘈榛炵殑瀛愰爡
               chainUris.forEach(function (uri) {
                 pinExDirExpanded[uri] = true;
               });
               vscode.postMessage({ type: 'listPinExDir', uri: finalNode.uri });
             } else {
-              // 收起時，把鏈上所有目錄都標記為收起
+              // 鏀惰捣鏅傦紝鎶婇張涓婃墍鏈夌洰閷勯兘妯欒鐐烘敹璧?
               chainUris.forEach(function (uri) {
                 pinExDirExpanded[uri] = false;
               });
@@ -9129,12 +9374,12 @@ function getWebviewContent(version: string): string {
           parent.appendChild(container);
         }
 
-        // 先渲染目錄（可多層展開）
+        // 鍏堟覆鏌撶洰閷勶紙鍙灞ゅ睍闁嬶級
         dirs.forEach(function (d) {
           renderDirNode(d, pinExListEl, true);
         });
 
-        // 再渲染直接 PinEx 的文件
+        // 鍐嶆覆鏌撶洿鎺?PinEx 鐨勬枃浠?
         files.forEach(function (p) {
           renderFileItem(p, pinExListEl, true);
         });
@@ -9157,7 +9402,7 @@ function getWebviewContent(version: string): string {
         var keyword = (pinExFilterText || '').trim().toLowerCase();
         var items = allOpenFiles.slice();
 
-        // 如果有搜索關鍵字，過濾
+        // 濡傛灉鏈夋悳绱㈤棞閸靛瓧锛岄亷婵?
         if (keyword) {
           items = items.filter(function (f) {
             return f.name.toLowerCase().indexOf(keyword) >= 0 ||
@@ -9165,7 +9410,7 @@ function getWebviewContent(version: string): string {
           });
         }
 
-        // 檢查文件是否已被固定
+        // 妾㈡煡鏂囦欢鏄惁宸茶鍥哄畾
         function isPinned(uri) {
           for (var i = 0; i < allPinEx.length; i++) {
             if (allPinEx[i].uri === uri) {
@@ -9175,7 +9420,7 @@ function getWebviewContent(version: string): string {
           return false;
         }
 
-        // 排序：已固定的文件排在最上面
+        // 鎺掑簭锛氬凡鍥哄畾鐨勬枃浠舵帓鍦ㄦ渶涓婇潰
         items.sort(function (a, b) {
           var aPinned = isPinned(a.uri);
           var bPinned = isPinned(b.uri);
@@ -9197,7 +9442,7 @@ function getWebviewContent(version: string): string {
           item.className = 'pinex-item';
           item.setAttribute('data-uri', file.uri);
 
-          // 如果是活動文件，添加高亮
+          // 濡傛灉鏄椿鍕曟枃浠讹紝娣诲姞楂樹寒
           if (file.isActive) {
             item.classList.add('active');
           }
@@ -9207,11 +9452,11 @@ function getWebviewContent(version: string): string {
           item.title = file.uri;
           item.appendChild(textSpan);
 
-          // 添加固定按鈕（Pin 按鈕）
+          // 娣诲姞鍥哄畾鎸夐垥锛圥in 鎸夐垥锛?
           var pinSpan = document.createElement('span');
           var filePinned = isPinned(file.uri);
           pinSpan.className = 'comment-delete pinex-pin-action' + (filePinned ? ' pinned' : '');
-          pinSpan.textContent = '📌';
+          pinSpan.textContent = 'P';
           pinSpan.title = filePinned ? 'Pinned (click to unpin)' : 'Pin this file';
           item.appendChild(pinSpan);
 
@@ -9262,7 +9507,7 @@ function getWebviewContent(version: string): string {
 
         var meta = document.createElement('div');
         meta.className = 'refs-load-more-meta';
-        meta.textContent = 'Opened: ' + (p4Snapshot.opened || []).length + ' · Pending CLs: ' + (p4Snapshot.pendingChanges || []).length;
+        meta.textContent = 'Opened: ' + (p4Snapshot.opened || []).length + ' - Pending CLs: ' + (p4Snapshot.pendingChanges || []).length;
         p4PanelEl.appendChild(meta);
 
         var openedByChange = {};
@@ -9292,14 +9537,14 @@ function getWebviewContent(version: string): string {
 
             var chevron = document.createElement('span');
             chevron.className = 'refs-chevron';
-            chevron.textContent = window.__p4Expanded[groupKey] ? '▼' : '▶';
+            chevron.textContent = window.__p4Expanded[groupKey] ? '-' : '+';
 
             var title = document.createElement('span');
             title.className = 'refs-group-title';
             if (String(cl.id).toLowerCase() === 'default') {
               title.textContent = cl.description || 'Default Changelist';
             } else {
-              title.textContent = cl.id + ' · ' + cl.date + ' · ' + (cl.description || '');
+              title.textContent = cl.id + ' - ' + cl.date + ' - ' + (cl.description || '');
             }
 
             var count = document.createElement('span');
@@ -9376,7 +9621,7 @@ function getWebviewContent(version: string): string {
 
             var metaSpan = document.createElement('span');
             metaSpan.className = 'p4-file-meta';
-            metaSpan.textContent = String(item.action || '').toLowerCase() + (item.change ? ' · ' + item.change : '');
+            metaSpan.textContent = String(item.action || '').toLowerCase() + (item.change ? ' - ' + item.change : '');
 
             row.appendChild(badge);
             row.appendChild(name);
@@ -9526,8 +9771,8 @@ function getWebviewContent(version: string): string {
 	        var rootName = svnSnapshot.scopeLabel || (svnSnapshot.scopePath
 	          ? svnSnapshot.scopePath.replace(/\\\\/g, '/').split('/').pop()
 	          : (svnSnapshot.workingCopyRoot ? svnSnapshot.workingCopyRoot.replace(/\\\\/g, '/').split('/').pop() : 'project'));
-	        meta.textContent = 'Changed: ' + visibleSvnItems.length + ' · ' + rootName
-	          + (hiddenUnversioned ? ' · hidden unversioned: ' + hiddenUnversioned : '');
+	        meta.textContent = 'Changed: ' + visibleSvnItems.length + ' - ' + rootName
+	          + (hiddenUnversioned ? ' - hidden unversioned: ' + hiddenUnversioned : '');
 	        svnPanelEl.appendChild(meta);
 
 	        if (!visibleSvnItems.length) {
@@ -9662,7 +9907,7 @@ function getWebviewContent(version: string): string {
 
           var chevron = document.createElement('span');
           chevron.className = 'vcs-tree-chevron';
-          chevron.textContent = expanded ? '▼' : '▶';
+          chevron.textContent = expanded ? '-' : '+';
           row.appendChild(chevron);
 
           if (node.item) {
@@ -9749,7 +9994,7 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 确定当前激活会话
+        // 纭畾褰撳墠婵€娲讳細璇?
         var active = null;
         for (var i = 0; i < allReferenceSessions.length; i++) {
           if (allReferenceSessions[i] && allReferenceSessions[i].id === activeReferenceSessionId) {
@@ -9763,14 +10008,14 @@ function getWebviewContent(version: string): string {
           persistState();
         }
 
-        // 渲染会话列表（固定的会标记📌；可多次固定）
+        // 娓叉煋浼氳瘽鍒楄〃锛堝浐瀹氱殑浼氭爣璁梆煋岋紱鍙娆″浐瀹氾級
         allReferenceSessions.forEach(function (s) {
           var row = document.createElement('div');
           row.className = 'refs-session-item' + (s.id === activeReferenceSessionId ? ' active' : '');
           var mode = (s && s.mode) ? s.mode : 'references';
-          // 会话标签：用英文首字母区分
+          // 浼氳瘽鏍囩锛氱敤鑻辨枃棣栧瓧姣嶅尯鍒?
           var modeText = (mode === 'implementations') ? 'I' : 'R';
-          // 需求：列表显示“所在类.符号”；详细信息放到 tooltip（包含文件与行号）
+          // 闇€姹傦細鍒楄〃鏄剧ず鈥滄墍鍦ㄧ被.绗﹀彿鈥濓紱璇︾粏淇℃伅鏀惧埌 tooltip锛堝寘鍚枃浠朵笌琛屽彿锛?
           var tip = (s.query && s.query.uri)
             ? ('[' + modeText + '] ' + (s.title || s.query.symbol) + ' @ ' + s.query.uri + ':' + (s.query.line + 1))
             : (s.title || '');
@@ -9783,7 +10028,7 @@ function getWebviewContent(version: string): string {
 
           var titleSpan = document.createElement('span');
           titleSpan.className = 'refs-session-title';
-          // 需求：不在前方显示固定图标，只通过右侧📌按钮状态表达
+          // 闇€姹傦細涓嶅湪鍓嶆柟鏄剧ず鍥哄畾鍥炬爣锛屽彧閫氳繃鍙充晶P鎸夐挳鐘舵€佽〃杈?
           titleSpan.textContent = (s.title || 'References');
 
           var metaSpan = document.createElement('span');
@@ -9793,12 +10038,12 @@ function getWebviewContent(version: string): string {
 
           var pinSpan = document.createElement('span');
           pinSpan.className = 'refs-session-action refs-session-pin' + (s.pinned ? ' pinned' : '');
-          pinSpan.textContent = '📌';
+          pinSpan.textContent = 'P';
           pinSpan.title = s.pinned ? 'Unpin this result' : 'Pin this result (keep history)';
 
           var delSpan = document.createElement('span');
           delSpan.className = 'refs-session-action';
-          delSpan.textContent = '×';
+          delSpan.textContent = 'x';
           delSpan.title = 'Delete this result';
 
           row.appendChild(modeSpan);
@@ -9825,7 +10070,7 @@ function getWebviewContent(version: string): string {
           refsSessionListEl.appendChild(row);
         });
 
-        // 渲染结果列表：按“类(容器)”分组，点击展开显示引用位置（类似 VS Code 搜索结果）
+        // 娓叉煋缁撴灉鍒楄〃锛氭寜鈥滅被(瀹瑰櫒)鈥濆垎缁勶紝鐐瑰嚮灞曞紑鏄剧ず寮曠敤浣嶇疆锛堢被浼?VS Code 鎼滅储缁撴灉锛?
         var totalResults = (active && typeof active.totalCount === 'number') ? active.totalCount : ((active && active.results) ? active.results.length : 0);
         var storedResults = (active && active.results) ? active.results.length : 0;
         if (active && active.id && typeof refsVisibleCountBySession[active.id] !== 'number') {
@@ -9841,13 +10086,13 @@ function getWebviewContent(version: string): string {
             return (r.callRole || 'noncall') === 'call';
           });
         }
-        // toolbar：展开/收起
+        // toolbar锛氬睍寮€/鏀惰捣
         var toolbar = document.createElement('div');
         toolbar.className = 'refs-toolbar';
         if (refsSearching) {
           var searchingEl = document.createElement('div');
           searchingEl.className = 'refs-searching';
-          searchingEl.textContent = '⏳ Searching...';
+          searchingEl.textContent = '* Searching...';
           toolbar.appendChild(searchingEl);
         } else {
           var statusEl = document.createElement('div');
@@ -9858,7 +10103,7 @@ function getWebviewContent(version: string): string {
           toolbar.appendChild(statusEl);
         }
 
-        // 字段查询：读/写过滤三态（全部/只读/只写）——仅对“引用”有效
+        // 瀛楁鏌ヨ锛氳/鍐欒繃婊や笁鎬侊紙鍏ㄩ儴/鍙/鍙啓锛夆€斺€斾粎瀵光€滃紩鐢ㄢ€濇湁鏁?
         if (isFieldOrPropertyQuery) {
           var allBtn = document.createElement('button');
           allBtn.className = 'refs-toolbar-btn filter-all' + (refsAccessFilter === 'all' ? ' active' : '');
@@ -9897,7 +10142,7 @@ function getWebviewContent(version: string): string {
             setFilter('write');
           });
 
-          // 过滤按钮放在前面
+          // 杩囨护鎸夐挳鏀惧湪鍓嶉潰
           toolbar.appendChild(allBtn);
           toolbar.appendChild(readBtn);
           toolbar.appendChild(writeBtn);
@@ -9937,12 +10182,12 @@ function getWebviewContent(version: string): string {
         var expandBtn = document.createElement('button');
         expandBtn.className = 'refs-toolbar-btn';
         expandBtn.type = 'button';
-        expandBtn.textContent = '⊕';
+        expandBtn.textContent = 'Expand';
         expandBtn.title = 'Expand all';
         var collapseBtn = document.createElement('button');
         collapseBtn.className = 'refs-toolbar-btn';
         collapseBtn.type = 'button';
-        collapseBtn.textContent = '⊖';
+        collapseBtn.textContent = 'Collapse';
         collapseBtn.title = 'Collapse all';
         toolbar.appendChild(expandBtn);
         toolbar.appendChild(collapseBtn);
@@ -9959,13 +10204,13 @@ function getWebviewContent(version: string): string {
         }
 
 
-        // 展开状态：仅保存在内存 + state（按 session 维度）
+        // 灞曞紑鐘舵€侊細浠呬繚瀛樺湪鍐呭瓨 + state锛堟寜 session 缁村害锛?
         if (!window.__refsExpanded) window.__refsExpanded = {};
         if (!window.__refsExpanded[active.id]) window.__refsExpanded[active.id] = {};
         var expandedMap = window.__refsExpanded[active.id];
 
         function setAllExpanded(v) {
-          // v=true 展开所有分组；false 全收起
+          // v=true 灞曞紑鎵€鏈夊垎缁勶紱false 鍏ㄦ敹璧?
           Object.keys(expandedMap).forEach(function (k) { expandedMap[k] = v; });
         }
         expandBtn.addEventListener('click', function (ev) {
@@ -9989,7 +10234,7 @@ function getWebviewContent(version: string): string {
         Object.keys(byContainer).sort().forEach(function (container) {
           var groupKey = container;
           if (typeof expandedMap[groupKey] !== 'boolean') {
-            expandedMap[groupKey] = true; // 默认展开
+            expandedMap[groupKey] = true; // 榛樿灞曞紑
           }
 
           var header = document.createElement('div');
@@ -9997,7 +10242,7 @@ function getWebviewContent(version: string): string {
 
           var chevron = document.createElement('span');
           chevron.className = 'refs-chevron';
-          chevron.textContent = expandedMap[groupKey] ? '▼' : '▶';
+          chevron.textContent = expandedMap[groupKey] ? '-' : '+';
 
           var title = document.createElement('span');
           title.className = 'refs-group-title';
@@ -10048,7 +10293,7 @@ function getWebviewContent(version: string): string {
               var thisKey = (r.uri || '') + '#' + String(r.line) + ':' + String(r.character);
               var item = document.createElement('div');
               item.className = 'refs-item' + (selKey && thisKey === selKey ? ' selected' : '');
-              // 需求：鼠标停靠显示 Tip（显示该行内容）
+              // 闇€姹傦細榧犳爣鍋滈潬鏄剧ず Tip锛堟樉绀鸿琛屽唴瀹癸級
               item.title = (r.preview || '').trim();
 
               if (isFieldOrPropertyQuery && r.access) {
@@ -10060,7 +10305,7 @@ function getWebviewContent(version: string): string {
 
               var loc = document.createElement('span');
               loc.className = 'refs-loc';
-              // 需求：条目仅显示行号 + 引用行内容（不显示文件/类名）
+              // 闇€姹傦細鏉＄洰浠呮樉绀鸿鍙?+ 寮曠敤琛屽唴瀹癸紙涓嶆樉绀烘枃浠?绫诲悕锛?
               loc.textContent = 'Ln ' + (r.line + 1);
 
               var preview = document.createElement('span');
@@ -10078,7 +10323,7 @@ function getWebviewContent(version: string): string {
                 }
                 vscode.postMessage({ type: 'revealReference', uri: r.uri, line: r.line, character: r.character });
               });
-            // 需求：去掉“悬浮/悬停即预览”的逻辑（体验不好）
+            // 闇€姹傦細鍘绘帀鈥滄偓娴?鎮仠鍗抽瑙堚€濈殑閫昏緫锛堜綋楠屼笉濂斤級
 
               refsResultListEl.appendChild(item);
             });
@@ -10138,9 +10383,9 @@ function getWebviewContent(version: string): string {
         }
       }
 
-      // 悬停预览：交给扩展端用 VS Code 原生 Peek 实现
+      // 鎮仠棰勮锛氫氦缁欐墿灞曠鐢?VS Code 鍘熺敓 Peek 瀹炵幇
 
-      // 根据行号定位类和成员
+      // 鏍规嵁琛屽彿瀹氫綅绫诲拰鎴愬憳
       var currentHighlightedMemberLine = -1;
       function locateSymbolByLine(line) {
         console.log('[CursorEx-WV] locateSymbolByLine: line=' + line + ', classes=' + allSymbolClasses.length);
@@ -10149,7 +10394,7 @@ function getWebviewContent(version: string): string {
           return;
         }
         
-        // 找到光标所在的类（行号 >= 类起始行，且 < 下一个类的起始行）
+        // 鎵惧埌鍏夋爣鎵€鍦ㄧ殑绫伙紙琛屽彿 >= 绫昏捣濮嬭锛屼笖 < 涓嬩竴涓被鐨勮捣濮嬭锛?
         var targetClass = null;
         for (var i = 0; i < allSymbolClasses.length; i++) {
           var cls = allSymbolClasses[i];
@@ -10167,14 +10412,14 @@ function getWebviewContent(version: string): string {
         
         console.log('[CursorEx-WV] locateSymbolByLine: found class=' + targetClass.name + ' at line=' + targetClass.line);
         
-        // 如果类变了，切换到新类
+        // 濡傛灉绫诲彉浜嗭紝鍒囨崲鍒版柊绫?
         if (selectedSymbolClass !== targetClass.name) {
           console.log('[CursorEx-WV] locateSymbolByLine: switching class from ' + selectedSymbolClass + ' to ' + targetClass.name);
           selectedSymbolClass = targetClass.name;
           renderSymbols();
         }
         
-        // 找到光标所在的成员
+        // 鎵惧埌鍏夋爣鎵€鍦ㄧ殑鎴愬憳
         var classMembers = allSymbolMembers.filter(function(m) {
           return m.parentClass === targetClass.name;
         });
@@ -10189,10 +10434,10 @@ function getWebviewContent(version: string): string {
           }
         }
         
-        // 高亮成员
+        // 楂樹寒鎴愬憳
         currentHighlightedMemberLine = targetMember ? targetMember.line : -1;
         
-        // 更新成员高亮
+        // 鏇存柊鎴愬憳楂樹寒
         var memberItems = symbolMemberListEl.querySelectorAll('.symbol-item');
         memberItems.forEach(function(item) {
           var itemLine = parseInt(item.getAttribute('data-line') || '-1', 10);
@@ -10204,7 +10449,7 @@ function getWebviewContent(version: string): string {
           }
         });
         
-        // 更新类高亮
+        // 鏇存柊绫婚珮浜?
         var classItems = symbolClassListEl.querySelectorAll('.symbol-item');
         classItems.forEach(function(item) {
           if (item.getAttribute('data-name') === targetClass.name) {
@@ -10216,14 +10461,103 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // 渲染符号列表
+      // 娓叉煋绗﹀彿鍒楄〃
+      function normalizeSymbolSearchText(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      }
+
+      function symbolSearchAcronym(value) {
+        var text = String(value || '');
+        var matches = text.match(/[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])/g);
+        if (!matches || !matches.length) {
+          return text.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+        }
+        return matches.map(function (part) { return part.charAt(0); }).join('').toLowerCase();
+      }
+
+      function symbolSubsequenceMatch(query, target) {
+        if (!query) return true;
+        var qi = 0;
+        for (var ti = 0; ti < target.length && qi < query.length; ti++) {
+          if (target.charAt(ti) === query.charAt(qi)) {
+            qi++;
+          }
+        }
+        return qi === query.length;
+      }
+
+      function matchesSymbolFilter(item) {
+        var query = normalizeSymbolSearchText(symbolFilterText);
+        if (!query) return true;
+        var normalizedName = normalizeSymbolSearchText(item && item.name);
+        if (normalizedName.indexOf(query) >= 0) return true;
+        var acronym = symbolSearchAcronym(item && item.name);
+        if (acronym && symbolSubsequenceMatch(query, acronym)) return true;
+        return symbolSubsequenceMatch(query, normalizedName);
+      }
+
+      function appendSymbolHighlightedText(parent, value) {
+        var text = String(value || '');
+        var query = normalizeSymbolSearchText(symbolFilterText);
+        if (!query || !text) {
+          parent.appendChild(document.createTextNode(text));
+          return;
+        }
+
+        var marked = {};
+        var lower = text.toLowerCase();
+        var contiguous = lower.indexOf(symbolFilterText.toLowerCase());
+        if (contiguous >= 0) {
+          for (var ci = contiguous; ci < contiguous + symbolFilterText.length; ci++) {
+            marked[ci] = true;
+          }
+        } else {
+          var qi = 0;
+          for (var ti = 0; ti < text.length && qi < query.length; ti++) {
+            var ch = text.charAt(ti).toLowerCase();
+            if (!/[a-z0-9]/.test(ch)) {
+              continue;
+            }
+            if (ch === query.charAt(qi)) {
+              marked[ti] = true;
+              qi++;
+            }
+          }
+        }
+
+        var buffer = '';
+        var bufferMarked = false;
+        function flush() {
+          if (!buffer) return;
+          if (bufferMarked) {
+            var span = document.createElement('span');
+            span.className = 'symbol-match';
+            span.textContent = buffer;
+            parent.appendChild(span);
+          } else {
+            parent.appendChild(document.createTextNode(buffer));
+          }
+          buffer = '';
+        }
+
+        for (var i = 0; i < text.length; i++) {
+          var isMarked = !!marked[i];
+          if (buffer && isMarked !== bufferMarked) {
+            flush();
+          }
+          bufferMarked = isMarked;
+          buffer += text.charAt(i);
+        }
+        flush();
+      }
+
       function renderSymbols() {
         console.log('[CursorEx-Webview] renderSymbols called, classes:', allSymbolClasses.length);
         if (!symbolClassListEl || !symbolMemberListEl) return;
         symbolClassListEl.innerHTML = '';
         symbolMemberListEl.innerHTML = '';
 
-        // 如果没有打开文件
+        // 濡傛灉娌℃湁鎵撳紑鏂囦欢
         if (!symbolFileUri) {
           var emptyDiv = document.createElement('div');
           emptyDiv.className = 'symbol-empty';
@@ -10232,7 +10566,7 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 如果不是 C# 文件
+        // 濡傛灉涓嶆槸 C# 鏂囦欢
         if (symbolNotCs) {
           var notCsDiv = document.createElement('div');
           notCsDiv.className = 'symbol-empty';
@@ -10241,7 +10575,7 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 如果没有类
+        // 濡傛灉娌℃湁绫?
         if (!allSymbolClasses.length) {
           var noClassDiv = document.createElement('div');
           noClassDiv.className = 'symbol-empty';
@@ -10250,7 +10584,14 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 渲染类列表
+        // 娓叉煋绫诲垪琛?
+        var selectedClassVisible = allSymbolClasses.some(function (cls) {
+          return cls.name === selectedSymbolClass;
+        });
+        if ((!selectedSymbolClass || !selectedClassVisible) && allSymbolClasses.length > 0) {
+          selectedSymbolClass = allSymbolClasses[0].name;
+        }
+
         var classTitle = document.createElement('div');
         classTitle.className = 'symbol-section-title';
         classTitle.textContent = 'Types (' + allSymbolClasses.length + ')';
@@ -10278,7 +10619,7 @@ function getWebviewContent(version: string): string {
           item.appendChild(icon);
           item.appendChild(name);
 
-          // 点击类：选中、显示成员并跳转到定义位置
+          // 鐐瑰嚮绫伙細閫変腑銆佹樉绀烘垚鍛樺苟璺宠浆鍒板畾涔変綅缃?
           (function(clsItem, clsData) {
             clsItem.onclick = function (e) {
               console.log('[CursorEx-Webview] Class clicked:', clsData.name, 'line:', clsData.line, 'uri:', symbolFileUri);
@@ -10294,16 +10635,19 @@ function getWebviewContent(version: string): string {
           console.log('[CursorEx-Webview] Class item added:', cls.name);
         });
 
-        // 渲染成员列表
+        // 娓叉煋鎴愬憳鍒楄〃
         console.log('[CursorEx-Webview] Selected class:', selectedSymbolClass);
         console.log('[CursorEx-Webview] All members parentClasses:', [...new Set(allSymbolMembers.map(m => m.parentClass))]);
-        var filteredMembers = allSymbolMembers.filter(function (m) {
-          return m.parentClass === selectedSymbolClass;
-        });
+        var filteredMembers = symbolFilterText
+          ? allSymbolMembers.slice()
+          : allSymbolMembers.filter(function (m) {
+              return m.parentClass === selectedSymbolClass;
+            });
         console.log('[CursorEx-Webview] Filtered members:', filteredMembers.length);
 
         var visibleMembers = filteredMembers.filter(function (m) {
           if (!m || !m.kind) return true;
+          if (symbolFilterText && !matchesSymbolFilter(m)) return false;
           if (m.kind === 'field' || m.kind === 'event') return !!symbolMemberFilters.field;
           if (m.kind === 'property') return !!symbolMemberFilters.property;
           if (m.kind === 'method' || m.kind === 'constructor') return !!symbolMemberFilters.method;
@@ -10316,12 +10660,14 @@ function getWebviewContent(version: string): string {
           return (a.line || 0) - (b.line || 0);
         });
 
-        // 成员筛选工具栏（字段/属性/函数）
+        // 鎴愬憳绛涢€夊伐鍏锋爮锛堝瓧娈?灞炴€?鍑芥暟锛?
         var memberToolbar = document.createElement('div');
         memberToolbar.className = 'symbol-member-toolbar';
         var toolbarTitle = document.createElement('div');
         toolbarTitle.className = 'symbol-member-toolbar-title';
-        toolbarTitle.textContent = (selectedSymbolClass || 'Members') + ' (' + visibleMembers.length + '/' + filteredMembers.length + ')';
+        toolbarTitle.textContent = symbolFilterText
+          ? ('Search results (' + visibleMembers.length + '/' + filteredMembers.length + ')')
+          : ((selectedSymbolClass || 'Members') + ' (' + visibleMembers.length + '/' + filteredMembers.length + ')');
         memberToolbar.appendChild(toolbarTitle);
 
         var toolbarActions = document.createElement('div');
@@ -10353,12 +10699,22 @@ function getWebviewContent(version: string): string {
         if (!filteredMembers.length) {
           var noMemberDiv = document.createElement('div');
           noMemberDiv.className = 'symbol-empty';
-          noMemberDiv.textContent = selectedSymbolClass ? 'This type has no members.' : 'Select a type.';
+          noMemberDiv.textContent = symbolFilterText
+            ? 'No members in this file.'
+            : (selectedSymbolClass ? 'This type has no members.' : 'Select a type.');
           symbolMemberListEl.appendChild(noMemberDiv);
           return;
         }
 
-        // 按类型分组
+        if (symbolFilterText && !visibleMembers.length) {
+          var noSearchMemberDiv = document.createElement('div');
+          noSearchMemberDiv.className = 'symbol-empty';
+          noSearchMemberDiv.textContent = 'No matching members.';
+          symbolMemberListEl.appendChild(noSearchMemberDiv);
+          return;
+        }
+
+        // 鎸夌被鍨嬪垎缁?
         var groupOrder = ['constructor', 'field', 'property', 'event', 'method'];
         var groupNames = {
           'constructor': 'Constructor',
@@ -10368,7 +10724,7 @@ function getWebviewContent(version: string): string {
           'method': 'Method'
         };
         var kindIcons = {
-          'constructor': '🔨',
+          'constructor': 'C',
           'field': 'F',
           'property': 'P',
           'event': 'E',
@@ -10387,23 +10743,32 @@ function getWebviewContent(version: string): string {
 
             var icon = document.createElement('span');
             icon.className = 'symbol-icon ' + member.kind;
-            icon.textContent = kindIcons[member.kind] || '•';
+            icon.textContent = kindIcons[member.kind] || '?';
 
             var contentSpan = document.createElement('span');
             contentSpan.className = 'symbol-content';
 
-            // 函数/构造函数：显示 "函数名(参数)"
-            // 变量/属性：显示 "类型 变量名"
+            // 鍑芥暟/鏋勯€犲嚱鏁帮細鏄剧ず "鍑芥暟鍚?鍙傛暟)"
+            // 鍙橀噺/灞炴€э細鏄剧ず "绫诲瀷 鍙橀噺鍚?
+            var parentPrefix = symbolFilterText && member.parentClass ? (member.parentClass + '.') : '';
             if (kind === 'method' || kind === 'constructor') {
-              // 函数名 + 参数，type 包含参数如 "(bool value)"
-              var funcDisplay = member.name + (member.type || '()');
-              contentSpan.textContent = funcDisplay;
+              // 鍑芥暟鍚?+ 鍙傛暟锛宼ype 鍖呭惈鍙傛暟濡?"(bool value)"
+              contentSpan.appendChild(document.createTextNode(parentPrefix));
+              appendSymbolHighlightedText(contentSpan, member.name);
+              contentSpan.appendChild(document.createTextNode(member.type || '()'));
             } else {
-              // 类型 + 变量名，type 包含类型如 "int"、"List<ResourceID>"
+              // 绫诲瀷 + 鍙橀噺鍚嶏紝type 鍖呭惈绫诲瀷濡?"int"銆?List<ResourceID>"
               if (member.type) {
-                contentSpan.innerHTML = '<span class="symbol-type-prefix">' + member.type + '</span> ' + member.name;
+                var typeSpan = document.createElement('span');
+                typeSpan.className = 'symbol-type-prefix';
+                appendSymbolHighlightedText(typeSpan, member.type);
+                contentSpan.appendChild(typeSpan);
+                contentSpan.appendChild(document.createTextNode(' '));
+                contentSpan.appendChild(document.createTextNode(parentPrefix));
+                appendSymbolHighlightedText(contentSpan, member.name);
               } else {
-                contentSpan.textContent = member.name;
+                contentSpan.appendChild(document.createTextNode(parentPrefix));
+                appendSymbolHighlightedText(contentSpan, member.name);
               }
             }
 
@@ -10422,7 +10787,7 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // References 面板分隔条拖拽逻辑
+      // References 闈㈡澘鍒嗛殧鏉℃嫋鎷介€昏緫
       (function initRefsResizer() {
         if (!refsResizer || !refsSessionListEl || !refsResultListEl) return;
 
@@ -10454,12 +10819,12 @@ function getWebviewContent(version: string): string {
           }
         });
 
-        // 初始化高度
+        // 鍒濆鍖栭珮搴?
         refsSessionListEl.style.height = refsSessionHeight + 'px';
       })();
 
-      // 符号面板分隔条拖拽逻辑
-      var symbolClassHeight = 120; // 默认高度
+      // 绗﹀彿闈㈡澘鍒嗛殧鏉℃嫋鎷介€昏緫
+      var symbolClassHeight = 120; // 榛樿楂樺害
       (function initSymbolResizer() {
         if (!symbolResizer || !symbolClassListEl || !symbolMemberListEl) return;
         
@@ -10490,11 +10855,11 @@ function getWebviewContent(version: string): string {
           }
         });
 
-        // 初始化高度
+        // 鍒濆鍖栭珮搴?
         symbolClassListEl.style.height = symbolClassHeight + 'px';
       })();
 
-      // PinEx Tab 切換邏輯
+      // PinEx Tab 鍒囨彌閭忚集
       function switchPinExTab(tabName) {
         if (!isPinExTabVisible(tabName)) {
           tabName = firstVisiblePinExTab();
@@ -10502,7 +10867,7 @@ function getWebviewContent(version: string): string {
         console.log('[CursorEx-Webview] switchPinExTab:', tabName);
         debugPinExTabs('switchPinExTab -> ' + tabName);
         pinExActiveTab = tabName;
-        // 更新 Tab 按鈕狀態
+        // 鏇存柊 Tab 鎸夐垥鐙€鎱?
         for (var i = 0; i < pinExTabs.length; i++) {
           var tab = pinExTabs[i];
           if (tab.getAttribute('data-tab') === tabName) {
@@ -10511,7 +10876,7 @@ function getWebviewContent(version: string): string {
             tab.classList.remove('active');
           }
         }
-        // 更新內容區域顯示
+        // 鏇存柊鍏у鍗€鍩熼’绀?
         for (var j = 0; j < pinExTabContents.length; j++) {
           var content = pinExTabContents[j];
           if ((tabName === 'todo' && content.id === 'pinex-todo-content') ||
@@ -10527,7 +10892,7 @@ function getWebviewContent(version: string): string {
             content.classList.remove('active');
           }
         }
-        // 刷新對應的列表
+        // 鍒锋柊灏嶆噳鐨勫垪琛?
         if (tabName === 'todo') {
           renderTodos();
         } else if (tabName === 'comment') {
@@ -10543,17 +10908,17 @@ function getWebviewContent(version: string): string {
           vscode.postMessage({ type: 'getSvnSnapshot' });
           renderSvn();
         } else if (tabName === 'refs') {
-          // 请求最新引用会话并渲染
+          // 璇锋眰鏈€鏂板紩鐢ㄤ細璇濆苟娓叉煋
           vscode.postMessage({ type: 'getReferenceSessions' });
           renderReferences();
         } else if (tabName === 'symbol') {
-          // 请求最新符号数据
+          // 璇锋眰鏈€鏂扮鍙锋暟鎹?
           console.log('[CursorEx-Webview] Requesting symbols...');
           vscode.postMessage({ type: 'getSymbols' });
         }
       }
 
-      // 綁定 Tab 點擊事件
+      // 缍佸畾 Tab 榛炴搳浜嬩欢
       function handlePinExTabInteraction(ev) {
           debugPinExTabs('event=' + ev.type + ', target=' + ((ev.target && ev.target.className) || ev.target && ev.target.tagName || 'unknown'));
           var target = ev.target;
@@ -10597,7 +10962,7 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // Tab 宽度不够时：只显示图标，隐藏文字
+      // Tab 瀹藉害涓嶅鏃讹細鍙樉绀哄浘鏍囷紝闅愯棌鏂囧瓧
       (function initTabCompactMode() {
         var tabBar = document.querySelector('.pinex-tabs');
         if (!tabBar) return;
@@ -10621,7 +10986,7 @@ function getWebviewContent(version: string): string {
           var ro = new ResizeObserver(function () { update(); });
           ro.observe(tabBar);
         } catch (e) {
-          // 兼容：无 ResizeObserver 时退化为 window resize
+          // 鍏煎锛氭棤 ResizeObserver 鏃堕€€鍖栦负 window resize
           window.addEventListener('resize', function () { update(); });
         }
         setTimeout(function () { update(); }, 50);
@@ -10645,7 +11010,7 @@ function getWebviewContent(version: string): string {
       if (pinExExpandAllBtn) {
         pinExExpandAllBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
-          // 進入「全部展開」模式，對所有已 PinEx 的根目錄和其所有子目錄遞歸展開
+          // 閫插叆銆屽叏閮ㄥ睍闁嬨€嶆ā寮忥紝灏嶆墍鏈夊凡 PinEx 鐨勬牴鐩寗鍜屽叾鎵€鏈夊瓙鐩寗閬炴灞曢枊
           pinExExpandAllRequested = true;
           var dirs = allPinEx.filter(function (x) { return !!x.isDirectory; });
           dirs.forEach(function (d) {
@@ -10666,7 +11031,7 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // 嘗試定位到目標文件（在目錄加載後會再次調用）
+      // 鍢楄│瀹氫綅鍒扮洰妯欐枃浠讹紙鍦ㄧ洰閷勫姞杓夊緦鏈冨啀娆¤鐢級
       function findPinExElementByUri(rootEl, uri) {
         if (!rootEl || !uri) return null;
         var els = rootEl.querySelectorAll('[data-uri]');
@@ -10680,7 +11045,7 @@ function getWebviewContent(version: string): string {
       function tryLocateActivePinEx() {
         if (!pinExLocatePending || !pinExLocateTargetUri || !pinExListEl) return;
 
-        // 先檢查文件是否已經可見
+        // 鍏堟鏌ユ枃浠舵槸鍚﹀凡缍撳彲瑕?
         var activeItem = findPinExElementByUri(pinExListEl, pinExLocateTargetUri);
         if (activeItem && typeof activeItem.scrollIntoView === 'function') {
           activeItem.scrollIntoView({ block: 'center' });
@@ -10689,17 +11054,17 @@ function getWebviewContent(version: string): string {
           return;
         }
 
-        // 查找需要展開的目錄路徑
+        // 鏌ユ壘闇€瑕佸睍闁嬬殑鐩寗璺緫
         var dirsToExpand = [];
         
-        // 先查找頂層目錄
+        // 鍏堟煡鎵鹃爞灞ょ洰閷?
         allPinEx.forEach(function (item) {
           if (item.isDirectory && pinExLocateTargetUri.indexOf(item.uri) === 0 && pinExLocateTargetUri !== item.uri) {
             dirsToExpand.push(item.uri);
           }
         });
 
-        // 遞歸查找所有已加載的子目錄
+        // 閬炴鏌ユ壘鎵€鏈夊凡鍔犺級鐨勫瓙鐩寗
         function findNestedDirs(parentUri) {
           var children = pinExDirChildren[parentUri];
           if (!Array.isArray(children)) return;
@@ -10715,7 +11080,7 @@ function getWebviewContent(version: string): string {
           findNestedDirs(uri);
         });
 
-        // 展開所有需要展開的目錄
+        // 灞曢枊鎵€鏈夐渶瑕佸睍闁嬬殑鐩寗
         var needsLoading = false;
         dirsToExpand.forEach(function (dirUri) {
           pinExDirExpanded[dirUri] = true;
@@ -10725,10 +11090,10 @@ function getWebviewContent(version: string): string {
           }
         });
 
-        // 重新渲染
+        // 閲嶆柊娓叉煋
         renderPinEx();
 
-        // 如果沒有需要加載的目錄，再次嘗試定位
+        // 濡傛灉娌掓湁闇€瑕佸姞杓夌殑鐩寗锛屽啀娆″槜瑭﹀畾浣?
         if (!needsLoading) {
           setTimeout(function () {
             var item = findPinExElementByUri(pinExListEl, pinExLocateTargetUri);
@@ -10739,7 +11104,7 @@ function getWebviewContent(version: string): string {
             pinExLocateTargetUri = null;
           }, 50);
         }
-        // 如果有目錄正在加載，等待 pinExDirChildren 消息處理後再次調用 tryLocateActivePinEx
+        // 濡傛灉鏈夌洰閷勬鍦ㄥ姞杓夛紝绛夊緟 pinExDirChildren 娑堟伅铏曠悊寰屽啀娆¤鐢?tryLocateActivePinEx
       }
 
       if (pinExLocateBtn) {
@@ -10747,11 +11112,11 @@ function getWebviewContent(version: string): string {
           ev.stopPropagation();
           if (!activePinExUri) return;
           
-          // 根據當前 Tab 選擇要定位的列表
+          // 鏍规摎鐣跺墠 Tab 閬告搰瑕佸畾浣嶇殑鍒楄〃
           if (pinExActiveTab === 'symbol' || pinExActiveTab === 'refs') {
-            // 需求：若在 类视图/References，定位按钮应先回到“固定”Tab 再执行定位
+            // 闇€姹傦細鑻ュ湪 绫昏鍥?References锛屽畾浣嶆寜閽簲鍏堝洖鍒扳€滃浐瀹氣€漈ab 鍐嶆墽琛屽畾浣?
             switchPinExTab('pin');
-            // 等待一次渲染后再执行定位（避免 pinex-list 尚未可见）
+            // 绛夊緟涓€娆℃覆鏌撳悗鍐嶆墽琛屽畾浣嶏紙閬垮厤 pinex-list 灏氭湭鍙锛?
             setTimeout(function () {
               if (!pinExListEl) return;
               var activeItem2 = findPinExElementByUri(pinExListEl, activePinExUri);
@@ -10764,14 +11129,14 @@ function getWebviewContent(version: string): string {
               tryLocateActivePinEx();
             }, 60);
           } else if (pinExActiveTab === 'open') {
-            // 在"打開"Tab 中定位
+            // 鍦?鎵撻枊"Tab 涓畾浣?
             if (!pinExOpenListEl) return;
             var openActiveItem = pinExOpenListEl.querySelector('.pinex-item.active');
             if (openActiveItem && typeof openActiveItem.scrollIntoView === 'function') {
               openActiveItem.scrollIntoView({ block: 'center' });
             }
           } else {
-            // 在"固定"Tab 中定位
+            // 鍦?鍥哄畾"Tab 涓畾浣?
             if (!pinExListEl) return;
             var activeItem = findPinExElementByUri(pinExListEl, activePinExUri);
             if (activeItem && typeof activeItem.scrollIntoView === 'function') {
@@ -10779,7 +11144,7 @@ function getWebviewContent(version: string): string {
           return;
         }
             
-            // 設置定位請求狀態並開始嘗試定位（展開目錄）
+            // 瑷疆瀹氫綅璜嬫眰鐙€鎱嬩甫闁嬪鍢楄│瀹氫綅锛堝睍闁嬬洰閷勶級
             pinExLocatePending = true;
             pinExLocateTargetUri = activePinExUri;
             tryLocateActivePinEx();
@@ -10788,9 +11153,9 @@ function getWebviewContent(version: string): string {
       }
 
       /**
-       * 遞歸展開指定 PinEx 目錄及其所有子目錄。
-       * 若當前尚未獲取該目錄的子項，會向擴展端請求一次 listPinExDir，
-       * 收到回覆後在 pinExDirChildren 處理邏輯中繼續遞歸。
+       * 閬炴灞曢枊鎸囧畾 PinEx 鐩寗鍙婂叾鎵€鏈夊瓙鐩寗銆?
+       * 鑻ョ暥鍓嶅皻鏈嵅鍙栬┎鐩寗鐨勫瓙闋咃紝鏈冨悜鎿村睍绔珛姹備竴娆?listPinExDir锛?
+       * 鏀跺埌鍥炶寰屽湪 pinExDirChildren 铏曠悊閭忚集涓辜绾岄仦姝搞€?
        * @param {string} dirUri
        */
       function expandPinExDirRecursive(dirUri) {
@@ -10809,17 +11174,17 @@ function getWebviewContent(version: string): string {
       }
 
       function getTodoMinHeight() {
-        // 固定最小高度，不根据内容自动撑大
+        // 鍥哄畾鏈€灏忛珮搴︼紝涓嶆牴鎹唴瀹硅嚜鍔ㄦ拺澶?
         return 80;
       }
 
       function getNoteMinHeight() {
-        // 固定最小高度，不根据内容自动撑大
+        // 鍥哄畾鏈€灏忛珮搴︼紝涓嶆牴鎹唴瀹硅嚜鍔ㄦ拺澶?
         return 80;
       }
 
       function getPinExMinHeight() {
-        // 固定最小高度，不根据内容自动撑大
+        // 鍥哄畾鏈€灏忛珮搴︼紝涓嶆牴鎹唴瀹硅嚜鍔ㄦ拺澶?
         return 80;
       }
 
@@ -10829,8 +11194,8 @@ function getWebviewContent(version: string): string {
       }
 
       function syncHeightsFromContent() {
-        // 只刷新布局位置，不自动调整高度
-        // 面板高度由用户手动拖拽调整
+        // 鍙埛鏂板竷灞€浣嶇疆锛屼笉鑷姩璋冩暣楂樺害
+        // 闈㈡澘楂樺害鐢辩敤鎴锋墜鍔ㄦ嫋鎷借皟鏁?
         applyHeights();
       }
 
@@ -10872,7 +11237,7 @@ function getWebviewContent(version: string): string {
           return null;
         }
 
-        // 先移除，再按順序重新添加
+        // 鍏堢Щ闄わ紝鍐嶆寜闋嗗簭閲嶆柊娣诲姞
         cardIds.forEach(function (id) {
           var el = getSectionElement(id);
           if (el && el.parentElement === bodyRoot) {
@@ -10962,12 +11327,12 @@ function getWebviewContent(version: string): string {
         });
       }
 
-      // 綁定折疊（點擊標題區非工具按鈕部分）
+      // 缍佸畾鎶樼枈锛堥粸鎿婃椤屽崁闈炲伐鍏锋寜閳曢儴鍒嗭級
       sectionHeaders.forEach(function (header) {
         header.addEventListener('click', function (ev) {
           var target = ev.target;
           if (target && target.classList) {
-            // 點擊移動按鈕 / 搜索框 / 顯示文件名按鈕時，不觸發折疊
+            // 榛炴搳绉诲嫊鎸夐垥 / 鎼滅储妗?/ 椤ず鏂囦欢鍚嶆寜閳曟檪锛屼笉瑙哥櫦鎶樼枈
             if (target.classList.contains('section-move-btn') ||
                 target.classList.contains('search-input') ||
                 target.classList.contains('todo-toggle-files') ||
@@ -10985,7 +11350,7 @@ function getWebviewContent(version: string): string {
         });
       });
 
-      // 上移 / 下移 按鈕控制卡片順序
+      // 涓婄Щ / 涓嬬Щ 鎸夐垥鎺у埗鍗＄墖闋嗗簭
       moveButtons.forEach(function (btn) {
         btn.addEventListener('click', function (ev) {
           ev.stopPropagation();
@@ -11012,7 +11377,7 @@ function getWebviewContent(version: string): string {
         });
       });
 
-      // 初始化佈局
+      // 鍒濆鍖栦綀灞€
       try {
       applyOrder();
       updateMoveButtons();
@@ -11020,7 +11385,7 @@ function getWebviewContent(version: string): string {
       applySectionCollapse();
       } catch (e) {
         console.error('Layout initialization failed:', e);
-        // 如果初始化失敗，嘗試重置狀態並重新初始化
+        // 濡傛灉鍒濆鍖栧け鏁楋紝鍢楄│閲嶇疆鐙€鎱嬩甫閲嶆柊鍒濆鍖?
         cardCollapsed = { pinex: false };
         cardHeights = { pinex: 220 };
         cardOrder = ['pinex'];
@@ -11060,7 +11425,7 @@ function getSvnFileHistoryHtml(
     return `<article class="entry">
       <div class="entry-top">
         <div class="revision">r${escapeHtmlText(entry.revision || '?')}</div>
-        <div class="meta">${escapeHtmlText(entry.author || 'unknown')} · ${escapeHtmlText(entry.date || '')}</div>
+        <div class="meta">${escapeHtmlText(entry.author || 'unknown')} - ${escapeHtmlText(entry.date || '')}</div>
         <button data-revision="${escapeHtmlText(entry.revision)}">Diff</button>
       </div>
       <pre class="message">${escapeHtmlText(message)}</pre>
@@ -11915,7 +12280,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
 
     switch (msg.type) {
       case 'getSettings':
-        // 发送当前设置到 Webview
+        // 鍙戦€佸綋鍓嶈缃埌 Webview
         const quickOpenKeybinding = await getQuickOpenKeybinding();
         const detectedProfile = await detectSearchProfile();
         const searchIndexSnapshot = workspaceSearchIndexRef?.getSnapshot();
@@ -12035,13 +12400,11 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
         await updateServiceRef?.installFromSettings();
         break;
       case 'openKeybindings':
-        // 打开快捷键设置页面
         await vscode.commands.executeCommand('workbench.action.openGlobalKeybindings');
-        // 提示用户搜索命令
         setTimeout(() => {
           vscode.window.showInformationMessage(
-            '请在快捷键设置中搜索 "cursorToolWindow.quickOpen" 来配置 Quick Open 的快捷键',
-            '知道了'
+            'Search "cursorToolWindow.quickOpen" in Keyboard Shortcuts to configure Quick Open.',
+            'OK'
           );
         }, 500);
         break;
@@ -12053,7 +12416,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
         }
         break;
       case 'saveSettings':
-        // 保存设置
+        // 淇濆瓨璁剧疆
         if (msg.global) {
           if (typeof msg.global.fontSize === 'number') {
             await config.update('global.fontSize', msg.global.fontSize, vscode.ConfigurationTarget.Global);
@@ -12155,7 +12518,7 @@ function openSettingsPanel(context: vscode.ExtensionContext): void {
           }
         }
         vscode.window.showInformationMessage('Settings saved.');
-        // 通知侧边栏 Webview 刷新配置
+        // 閫氱煡渚ц竟鏍?Webview 鍒锋柊閰嶇疆
         sidebarProvider?.refreshTodoContentFilter?.();
         sidebarProvider?.refreshPinExFilter?.();
         sidebarProvider?.refreshGlobalSettings?.();
@@ -12199,7 +12562,7 @@ function getSettingsWebviewContent(): string {
       background: var(--bg);
       color: var(--fg);
     }
-    /* 滚动条：默认隐藏，窗口获得焦点后显示 */
+    /* 婊氬姩鏉★細榛樿闅愯棌锛岀獥鍙ｈ幏寰楃劍鐐瑰悗鏄剧ず */
     body.scrollbar-hidden * {
       scrollbar-width: none; /* Firefox */
     }
@@ -12426,7 +12789,7 @@ function getSettingsWebviewContent(): string {
       </div>
       <div class="form-group">
         <label>Font size</label>
-        <div class="hint">Set the tool window font size (10–20px)</div>
+        <div class="hint">Set the tool window font size (10-40px)</div>
         <input type="number" id="global-fontSize" min="10" max="20" value="13" style="width:80px;" /> px
       </div>
       <div class="form-group">
@@ -12475,7 +12838,7 @@ function getSettingsWebviewContent(): string {
         <div class="hint" id="search-index-meta" style="margin-top:6px;">Waiting for index snapshot...</div>
       </div>
       <div class="form-group">
-        <label>🔍 Search Mode</label>
+        <label>馃攳 Search Mode</label>
         <div class="hint">Choose what to search: file names, symbols, file content, or both</div>
         <select id="search-mode" style="width:200px;padding:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
           <option value="all">All (File + Symbol + Content)</option>
@@ -12486,22 +12849,22 @@ function getSettingsWebviewContent(): string {
         </select>
       </div>
       <div class="form-group">
-        <label>📁 File Extensions</label>
+        <label>馃搧 File Extensions</label>
         <div class="hint">Only search files with these extensions (comma-separated, empty = all files)</div>
         <textarea id="search-fileExtensions" rows="2" placeholder="Leave empty to search all file types"></textarea>
       </div>
       <div class="form-group">
-        <label>📂 Include Directories</label>
+        <label>馃搨 Include Directories</label>
         <div class="hint">Only search in these directories (one per line, empty = whole workspace)</div>
         <textarea id="search-includeDirectories" rows="3" placeholder="src&#10;lib&#10;scripts"></textarea>
       </div>
       <div class="form-group">
-        <label>🚫 Exclude Directories</label>
+        <label>馃毇 Exclude Directories</label>
         <div class="hint">Skip these directories (one per line)</div>
         <textarea id="search-excludeDirectories" rows="4" placeholder="**/node_modules/**&#10;**/bin/**&#10;**/obj/**&#10;**/.git/**"></textarea>
       </div>
       <div class="form-group">
-        <label>🔠 Case Sensitive</label>
+        <label>馃敔 Case Sensitive</label>
         <div class="hint">Enable case-sensitive search</div>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="checkbox" id="search-caseSensitive" style="width:18px;height:18px;" />
@@ -12509,12 +12872,12 @@ function getSettingsWebviewContent(): string {
         </label>
       </div>
       <div class="form-group">
-        <label>⏱️ Search Delay</label>
+        <label>Search Delay</label>
         <div class="hint">Wait time (ms) after typing before starting search (100-1000)</div>
         <input type="number" id="search-debounceDelay" min="100" max="1000" value="300" style="width:100px;" /> ms
       </div>
       <div class="form-group">
-        <label>📊 Performance Settings</label>
+        <label>馃搳 Performance Settings</label>
         <div class="hint">Adjust for better performance or more results. Set "Max files to search" to 0 for no limit.</div>
         <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px;">
           <div style="display:flex;align-items:center;gap:10px;">
@@ -12536,7 +12899,7 @@ function getSettingsWebviewContent(): string {
         </div>
       </div>
       <div class="form-group">
-        <label>⌨️ Quick Open Shortcut</label>
+        <label>鈱笍 Quick Open Shortcut</label>
         <div class="hint">Default: Ctrl+T (Mac: Cmd+T). Click button to customize.</div>
         <button id="btn-openKeybindings" class="btn btn-secondary" style="margin-top:5px;">
           Open Keyboard Shortcuts Settings
@@ -12575,7 +12938,7 @@ function getSettingsWebviewContent(): string {
       </div>
       <div class="form-group">
         <label>Font size</label>
-        <div class="hint">0 uses global setting (10–20px)</div>
+        <div class="hint">0 uses global setting (10-40px)</div>
         <input type="number" id="todo-fontSize" min="0" max="20" value="0" style="width:80px;" /> px
       </div>
     </div>
@@ -12599,7 +12962,7 @@ function getSettingsWebviewContent(): string {
       </div>
       <div class="form-group">
         <label>Font size</label>
-        <div class="hint">0 uses global setting (10–20px)</div>
+        <div class="hint">0 uses global setting (10-40px)</div>
         <input type="number" id="comment-fontSize" min="0" max="20" value="0" style="width:80px;" /> px
       </div>
     </div>
@@ -12628,7 +12991,7 @@ function getSettingsWebviewContent(): string {
       </div>
       <div class="form-group">
         <label>Font size</label>
-        <div class="hint">0 uses global setting (10–20px)</div>
+        <div class="hint">0 uses global setting (10-40px)</div>
         <input type="number" id="pinex-fontSize" min="0" max="20" value="0" style="width:80px;" /> px
       </div>
       <div class="form-group">
@@ -12662,13 +13025,13 @@ function getSettingsWebviewContent(): string {
           b.classList.remove('scrollbar-visible');
         }
       }
-      // 默认隐藏；聚焦设置窗口后显示
+      // 榛樿闅愯棌锛涜仛鐒﹁缃獥鍙ｅ悗鏄剧ず
       setScrollbarVisible(false);
       window.addEventListener('focus', () => setScrollbarVisible(true));
       window.addEventListener('blur', () => setScrollbarVisible(false));
       document.addEventListener('mousedown', () => setScrollbarVisible(true), true);
 
-      // Tab 切换
+      // Tab 鍒囨崲
       document.querySelectorAll('.tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
           document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
@@ -12678,10 +13041,10 @@ function getSettingsWebviewContent(): string {
         });
       });
 
-      // 请求当前设置
+      // 璇锋眰褰撳墠璁剧疆
       vscode.postMessage({ type: 'getSettings' });
 
-      // 接收设置数据
+      // 鎺ユ敹璁剧疆鏁版嵁
       function renderSearchIndexSnapshot(snapshot) {
         if (!snapshot) return;
         var readyEl = document.getElementById('search-index-ready');
@@ -12772,14 +13135,14 @@ function getSettingsWebviewContent(): string {
             document.getElementById('todo-contentFilter').value = msg.todo.contentFilter || '';
             document.getElementById('todo-hoverColor').value = msg.todo.hoverColor || 'rgba(14,99,156,0.45)';
             document.getElementById('todo-fontSize').value = msg.todo.fontSize || 0;
-            // 更新 color picker
+            // 鏇存柊 color picker
             updateColorPickerFromText('todo-hoverColor-picker', 'todo-hoverColor');
           }
           if (msg.comment) {
             document.getElementById('comment-activeColor').value = msg.comment.activeColor || 'rgba(14,99,156,0.6)';
             document.getElementById('comment-hoverColor').value = msg.comment.hoverColor || 'rgba(14,99,156,0.45)';
             document.getElementById('comment-fontSize').value = msg.comment.fontSize || 0;
-            // 更新 color pickers
+            // 鏇存柊 color pickers
             updateColorPickerFromText('comment-activeColor-picker', 'comment-activeColor');
             updateColorPickerFromText('comment-hoverColor-picker', 'comment-hoverColor');
           }
@@ -12788,7 +13151,7 @@ function getSettingsWebviewContent(): string {
             document.getElementById('pinex-activeColor').value = msg.pinex.activeColor || 'rgba(14,99,156,0.6)';
             document.getElementById('pinex-hoverColor').value = msg.pinex.hoverColor || 'rgba(14,99,156,0.45)';
             document.getElementById('pinex-fontSize').value = msg.pinex.fontSize || 0;
-            // 更新 color pickers
+            // 鏇存柊 color pickers
             updateColorPickerFromText('pinex-activeColor-picker', 'pinex-activeColor');
             updateColorPickerFromText('pinex-hoverColor-picker', 'pinex-hoverColor');
           }
@@ -12819,14 +13182,14 @@ function getSettingsWebviewContent(): string {
         }
       });
 
-      // 輔助函數：從顏色值中提取 hex（用於設置 color picker）
+      // 杓斿姪鍑芥暩锛氬緸椤忚壊鍊间腑鎻愬彇 hex锛堢敤鏂艰ō缃?color picker锛?
       function extractHexFromColor(colorStr) {
         if (!colorStr) return '#0e639c';
-        // 如果已經是 hex 格式
+        // 濡傛灉宸茬稉鏄?hex 鏍煎紡
         if (colorStr.indexOf('#') === 0) {
-          return colorStr.substring(0, 7); // 只取前 7 個字符
+          return colorStr.substring(0, 7); // 鍙彇鍓?7 鍊嬪瓧绗?
         }
-        // 如果是 rgba 或 rgb 格式，提取 RGB 值
+        // 濡傛灉鏄?rgba 鎴?rgb 鏍煎紡锛屾彁鍙?RGB 鍊?
         var match = colorStr.match(/rgba?\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/);
         if (match) {
           var r = parseInt(match[1], 10).toString(16).padStart(2, '0');
@@ -12837,7 +13200,7 @@ function getSettingsWebviewContent(): string {
         return '#0e639c';
       }
 
-      // 輔助函數：根據文本輸入更新 color picker
+      // 杓斿姪鍑芥暩锛氭牴鎿氭枃鏈几鍏ユ洿鏂?color picker
       function updateColorPickerFromText(pickerId, textId) {
         var picker = document.getElementById(pickerId);
         var textInput = document.getElementById(textId);
@@ -12846,35 +13209,35 @@ function getSettingsWebviewContent(): string {
         }
       }
 
-      // 輔助函數：當 color picker 變化時更新對應的 text input（保留透明度如果有）
+      // 杓斿姪鍑芥暩锛氱暥 color picker 璁婂寲鏅傛洿鏂板皪鎳夌殑 text input锛堜繚鐣欓€忔槑搴﹀鏋滄湁锛?
       function setupColorPicker(pickerId, textId) {
         var picker = document.getElementById(pickerId);
         var textInput = document.getElementById(textId);
         if (!picker || !textInput) return;
 
-        // 初始化 color picker 的值
+        // 鍒濆鍖?color picker 鐨勫€?
         picker.value = extractHexFromColor(textInput.value);
 
         picker.addEventListener('input', function() {
           var currentValue = textInput.value || '';
-          // 如果當前值是 rgba，保留透明度
+          // 濡傛灉鐣跺墠鍊兼槸 rgba锛屼繚鐣欓€忔槑搴?
           var match = currentValue.match(/rgba\\s*\\([^,]+,[^,]+,[^,]+,\\s*([\\d.]+)\\s*\\)/);
           if (match) {
             var alpha = match[1];
-            // 從 hex 轉換為 rgb
+            // 寰?hex 杞夋彌鐐?rgb
             var hex = picker.value;
             var r = parseInt(hex.substring(1, 3), 16);
             var g = parseInt(hex.substring(3, 5), 16);
             var b = parseInt(hex.substring(5, 7), 16);
             textInput.value = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
           } else {
-            // 否則直接使用 hex
+            // 鍚﹀墖鐩存帴浣跨敤 hex
             textInput.value = picker.value;
           }
         });
       }
 
-      // 設置所有顏色選擇器
+      // 瑷疆鎵€鏈夐鑹查伕鎿囧櫒
       setupColorPicker('todo-hoverColor-picker', 'todo-hoverColor');
       setupColorPicker('comment-activeColor-picker', 'comment-activeColor');
       setupColorPicker('comment-hoverColor-picker', 'comment-hoverColor');
@@ -12891,7 +13254,7 @@ function getSettingsWebviewContent(): string {
         });
       }
 
-      // 保存按钮
+      // 淇濆瓨鎸夐挳
       document.getElementById('btn-save').addEventListener('click', function() {
         var extensions = document.getElementById('todo-extensions').value
           .split(',')
@@ -12935,7 +13298,7 @@ function getSettingsWebviewContent(): string {
         var pinexHoverColor = document.getElementById('pinex-hoverColor').value || 'rgba(14,99,156,0.45)';
         var pinexFontSize = parseInt(document.getElementById('pinex-fontSize').value, 10) || 0;
 
-        // Search 设置
+        // Search 璁剧疆
         var searchMode = document.getElementById('search-mode').value || 'all';
         var searchFileExtensions = document.getElementById('search-fileExtensions').value
           .split(',')
@@ -13002,7 +13365,7 @@ function getSettingsWebviewContent(): string {
         });
       });
 
-      // 打开快捷键设置按钮
+      // 鎵撳紑蹇嵎閿缃寜閽?
       document.getElementById('btn-openKeybindings').addEventListener('click', function() {
         vscode.postMessage({ type: 'openKeybindings' });
       });
@@ -13030,9 +13393,9 @@ function getSettingsWebviewContent(): string {
         vscode.postMessage({ type: 'installUpdate' });
       });
 
-      // 重置按钮
+      // 閲嶇疆鎸夐挳
       document.getElementById('btn-reset').addEventListener('click', function() {
-        // 全局设置
+        // 鍏ㄥ眬璁剧疆
         document.getElementById('global-fontSize').value = '13';
         document.getElementById('global-accentColor').value = '#0e639c';
         document.getElementById('global-textColor').value = '#f3f3f3';
@@ -13040,24 +13403,24 @@ function getSettingsWebviewContent(): string {
         document.getElementById('global-bgColor').value = '#1e1e1e';
         document.getElementById('global-borderColor').value = '#2d2d2d';
         document.getElementById('global-vcsProvider').value = 'auto';
-        // TODO 设置
+        // TODO 璁剧疆
         document.getElementById('todo-extensions').value = 'cs, csx, js, jsx, ts, tsx, cpp, c, h, hpp, java, go';
         document.getElementById('todo-excludeGlobs').value = '**/node_modules/**' + String.fromCharCode(10) + '**/bin/**' + String.fromCharCode(10) + '**/obj/**';
         document.getElementById('todo-includeGlobs').value = '';
         document.getElementById('todo-contentFilter').value = '';
         document.getElementById('todo-hoverColor').value = 'rgba(14,99,156,0.45)';
         document.getElementById('todo-fontSize').value = '0';
-        // COMMENT 设置
+        // COMMENT 璁剧疆
         document.getElementById('comment-activeColor').value = 'rgba(14,99,156,0.6)';
         document.getElementById('comment-hoverColor').value = 'rgba(14,99,156,0.45)';
         document.getElementById('comment-fontSize').value = '0';
-        // PinEx 设置
+        // PinEx 璁剧疆
         document.getElementById('pinex-fileExtensions').value = '';
         document.getElementById('pinex-activeColor').value = 'rgba(14,99,156,0.6)';
         document.getElementById('pinex-hoverColor').value = 'rgba(14,99,156,0.45)';
         document.getElementById('pinex-fontSize').value = '0';
         document.getElementById('pinex-quickOpenKeybinding').value = 'Ctrl+T (default)';
-        // Search 设置
+        // Search 璁剧疆
         document.getElementById('search-mode').value = 'all';
         document.getElementById('search-fileExtensions').value = '';
         document.getElementById('search-includeDirectories').value = '';
@@ -13076,8 +13439,8 @@ function getSettingsWebviewContent(): string {
 }
 
 async function getQuickOpenKeybinding(): Promise<string> {
-  // VS Code API 无法直接读取 keybindings.json 的内容
-  // 返回默认值，用户可以通过按钮打开快捷键设置页面查看和修改
+  // VS Code API 鏃犳硶鐩存帴璇诲彇 keybindings.json 鐨勫唴瀹?
+  // 杩斿洖榛樿鍊硷紝鐢ㄦ埛鍙互閫氳繃鎸夐挳鎵撳紑蹇嵎閿缃〉闈㈡煡鐪嬪拰淇敼
   return 'Ctrl+T (default)';
 }
 
