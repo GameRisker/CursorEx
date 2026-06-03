@@ -4277,7 +4277,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-let quickOpenPick: vscode.QuickPick<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean }> | undefined;
+let quickOpenPick: vscode.QuickPick<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }> | undefined;
 let quickOpenContext: vscode.ExtensionContext | undefined;
 let quickOpenPanel: vscode.WebviewPanel | undefined;
 
@@ -4288,6 +4288,7 @@ interface QuickSearchResultItem {
   uri: vscode.Uri;
   line?: number;
   pinned?: boolean;
+  symbolKind?: string;
 }
 
 function normalizeSearchPath(value: string): string {
@@ -4427,6 +4428,16 @@ function shouldSearchFiles(searchMode: string): boolean {
 
 function shouldSearchClasses(searchMode: string): boolean {
   return searchMode === 'class' || searchMode === 'fileclass' || searchMode === 'all';
+}
+
+function symbolIconForKind(kind?: string): string {
+  if (kind === 'function') return 'symbol-function';
+  if (kind === 'method') return 'symbol-method';
+  if (kind === 'constructor') return 'symbol-constructor';
+  if (kind === 'interface') return 'symbol-interface';
+  if (kind === 'enum') return 'symbol-enum';
+  if (kind === 'struct') return 'symbol-struct';
+  return 'symbol-class';
 }
 
 function shouldSearchContent(searchMode: string): boolean {
@@ -4648,12 +4659,12 @@ async function searchWorkspaceClasses(
   searchIncludeDirectories: string[],
   maxItems: number,
   pinExManager: PinExManager
-): Promise<Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number }>> {
+): Promise<Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }>> {
   const queryToSearch = caseSensitive ? query : query.toLowerCase();
-  const results: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number }> = [];
+  const results: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }> = [];
   const seen = new Set<string>();
-  const pushResult = (name: string, uri: vscode.Uri, line: number) => {
-    const key = `${uri.toString()}:${name}:${line}`;
+  const pushResult = (name: string, uri: vscode.Uri, line: number, symbolKind: string = 'class') => {
+    const key = `${uri.toString()}:${name}:${line}:${symbolKind}`;
     if (seen.has(key)) {
       return;
     }
@@ -4662,11 +4673,12 @@ async function searchWorkspaceClasses(
     const fileName = uri.fsPath.split(/[\\/]/).pop() || uri.toString();
     const isPinned = pinExManager.isPinned(uri);
     results.push({
-      label: `$(symbol-class) ${name}`,
+      label: `$(${symbolIconForKind(symbolKind)}) ${name}`,
       description: `in ${fileName}${isPinned ? ' 馃搶 pinned' : ''}`,
       uri: uri,
       isClass: true,
       line: line,
+      symbolKind,
       buttons: [
         {
           iconPath: new vscode.ThemeIcon(isPinned ? 'pinned' : 'pin'),
@@ -4684,7 +4696,22 @@ async function searchWorkspaceClasses(
     if (!uri || !name) {
       continue;
     }
-    if (kind !== vscode.SymbolKind.Class && kind !== vscode.SymbolKind.Struct && kind !== vscode.SymbolKind.Interface && kind !== vscode.SymbolKind.Enum) {
+    let symbolKind = '';
+    if (kind === vscode.SymbolKind.Class) {
+      symbolKind = 'class';
+    } else if (kind === vscode.SymbolKind.Struct) {
+      symbolKind = 'struct';
+    } else if (kind === vscode.SymbolKind.Interface) {
+      symbolKind = 'interface';
+    } else if (kind === vscode.SymbolKind.Enum) {
+      symbolKind = 'enum';
+    } else if (kind === vscode.SymbolKind.Function) {
+      symbolKind = 'function';
+    } else if (kind === vscode.SymbolKind.Method) {
+      symbolKind = 'method';
+    } else if (kind === vscode.SymbolKind.Constructor) {
+      symbolKind = 'constructor';
+    } else {
       continue;
     }
     if (!matchesSearchExtension(uri, searchFileExtensions) || !matchesSearchIncludeDirectories(uri, searchIncludeDirectories)) {
@@ -4698,7 +4725,7 @@ async function searchWorkspaceClasses(
     }
 
     const line = (symbol.location?.range?.start?.line ?? 0) + 1;
-    const key = `${uri.toString()}:${name}:${line}`;
+    const key = `${uri.toString()}:${name}:${line}:${symbolKind}`;
     if (seen.has(key)) {
       continue;
     }
@@ -4707,11 +4734,12 @@ async function searchWorkspaceClasses(
     const fileName = uri.fsPath.split(/[\\/]/).pop() || uri.toString();
     const isPinned = pinExManager.isPinned(uri);
     results.push({
-      label: `$(symbol-class) ${name}`,
+      label: `$(${symbolIconForKind(symbolKind)}) ${name}`,
       description: `in ${fileName}${isPinned ? ' 📌 pinned' : ''}`,
       uri: uri,
       isClass: true,
       line: line,
+      symbolKind,
       buttons: [
         {
           iconPath: new vscode.ThemeIcon(isPinned ? 'pinned' : 'pin'),
@@ -4729,6 +4757,7 @@ async function searchWorkspaceClasses(
     const includePattern = buildSearchIncludePattern(searchIncludeDirectories, searchFileExtensions);
     const candidateFiles = await vscode.workspace.findFiles(includePattern, null, 1000);
     const typeRegex = /\b(class|struct|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+    const functionRegex = /\b(?:function\s+([A-Za-z_$][A-Za-z0-9_$]*)|(?:def|func)\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_!?=]*)|(?:public|private|protected|internal|static|virtual|override|async|extern|sealed|abstract|partial|readonly|unsafe|final|synchronized|inline|constexpr|friend|\s)*(?:[A-Za-z_][A-Za-z0-9_:<>,\[\].?*&]*\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*(?:\{|=>|;))/g;
     for (const uri of candidateFiles) {
       if (results.length >= maxItems) {
         break;
@@ -4759,6 +4788,7 @@ async function searchWorkspaceClasses(
               uri: uri,
               isClass: true,
               line: i + 1,
+              symbolKind: match[1],
               buttons: [
                 {
                   iconPath: new vscode.ThemeIcon(isPinned ? 'pinned' : 'pin'),
@@ -4766,6 +4796,16 @@ async function searchWorkspaceClasses(
                 }
               ]
             } as any);
+          }
+          functionRegex.lastIndex = 0;
+          while ((match = functionRegex.exec(lines[i])) !== null) {
+            const name = match[1] || match[2] || match[3];
+            const symbolNameToSearch = caseSensitive ? name : name.toLowerCase();
+            const fuzzyScore = computeFilenameFuzzyScore(query, name, uri.fsPath);
+            if (!symbolNameToSearch.includes(queryToSearch) && fuzzyScore < 0) {
+              continue;
+            }
+            pushResult(name, uri, i + 1, 'function');
           }
         }
       } catch {
@@ -4855,10 +4895,11 @@ async function performQuickOpenSearch(
         classResults.push({
           kind: 'class',
           label: symbol.name,
-          description: symbol.fileName,
+          description: `${symbol.kind} in ${symbol.fileName}`,
           uri: symbol.uri,
           line: symbol.line,
-          pinned: pinExManager.isPinned(symbol.uri)
+          pinned: pinExManager.isPinned(symbol.uri),
+          symbolKind: symbol.kind
         });
       }
     }
@@ -4882,7 +4923,8 @@ async function performQuickOpenSearch(
           description: (item.description || '').replace(/^in\s+/, ''),
           uri: item.uri,
           line: (item as any).line,
-          pinned: pinExManager.isPinned(item.uri)
+          pinned: pinExManager.isPinned(item.uri),
+          symbolKind: (item as any).symbolKind || 'class'
         });
       }
     }
@@ -5122,8 +5164,16 @@ function getQuickOpenPanelHtml(): string {
     let activeIndex = 0;
     let debounceTimer = null;
 
-    function iconFor(kind) {
-      if (kind === 'class') return 'C';
+    function iconFor(kind, symbolKind) {
+      if (kind === 'class') {
+        if (symbolKind === 'function') return 'F';
+        if (symbolKind === 'method') return 'M';
+        if (symbolKind === 'constructor') return 'K';
+        if (symbolKind === 'interface') return 'I';
+        if (symbolKind === 'enum') return 'E';
+        if (symbolKind === 'struct') return 'S';
+        return 'C';
+      }
       if (kind === 'content') return 'T';
       return 'F';
     }
@@ -5143,7 +5193,7 @@ function getQuickOpenPanelHtml(): string {
         const activeClass = index === activeIndex ? ' active' : '';
         const meta = item.line ? item.description + '  Line ' + item.line : item.description;
         return '<div class="result-item' + activeClass + '" data-index="' + index + '">' +
-          '<div class="result-icon">' + iconFor(item.kind) + '</div>' +
+          '<div class="result-icon">' + iconFor(item.kind, item.symbolKind) + '</div>' +
           '<div><div class="result-title">' + escapeHtml(item.label) + '</div><div class="result-meta">' + escapeHtml(meta || '') + '</div></div>' +
           '</div>';
       }).join('');
@@ -5270,7 +5320,8 @@ async function showQuickOpenPanel(
         description: msg.item.description,
         uri: vscode.Uri.parse(msg.item.uri),
         line: typeof msg.item.line === 'number' ? msg.item.line : undefined,
-        pinned: !!msg.item.pinned
+        pinned: !!msg.item.pinned,
+        symbolKind: typeof msg.item.symbolKind === 'string' ? msg.item.symbolKind : undefined
       }, provider);
     }
   });
@@ -5294,16 +5345,16 @@ async function showQuickOpenWindow(
     return;
   }
 
-  const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean }>();
+  const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }>();
   quickOpenPick = quickPick;
   let resultFilterMode: 'all' | 'files' | 'classes' = initialFilterMode;
   const filterButtons: vscode.QuickInputButton[] = [
     { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Show all results' },
     { iconPath: new vscode.ThemeIcon('file'), tooltip: 'Show file results only' },
-    { iconPath: new vscode.ThemeIcon('symbol-class'), tooltip: 'Show class results only' }
+    { iconPath: new vscode.ThemeIcon('symbol-class'), tooltip: 'Show symbol results only' }
   ];
   
-  quickPick.placeholder = 'Search files, content, and symbols. Shortcuts: /f files, /c classes, /a all';
+  quickPick.placeholder = 'Search files, content, and symbols. Shortcuts: /f files, /c symbols, /a all';
   quickPick.matchOnDescription = true;
   quickPick.buttons = filterButtons;
 
@@ -5311,7 +5362,7 @@ async function showQuickOpenWindow(
     const suffix = resultFilterMode === FILTER_FILES
       ? 'Files'
       : resultFilterMode === FILTER_CLASSES
-        ? 'Classes'
+        ? 'Symbols'
         : 'All';
     quickPick.title = `Cursor Tools Search [${suffix}]`;
   };
@@ -5336,7 +5387,7 @@ async function showQuickOpenWindow(
   openFiles.forEach(f => openFileUris.add(f.uri.toString()));
 
   // 转换为 QuickPickItem，并附加 URI（不显示路径）
-  const items: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean }> = [];
+  const items: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }> = [];
   
   // 1. 先添加打开的文件
   openFiles.forEach(file => {
@@ -5484,7 +5535,7 @@ async function showQuickOpenWindow(
         const allResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; isContent?: boolean }> = [];
         const fileResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean }> = [];
         const contentResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; isContent?: boolean }> = [];
-        const classResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number }> = [];
+        const classResults: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; line?: number; symbolKind?: string }> = [];
 
         // 构建文件搜索模式
         const includePattern = buildSearchIncludePattern(searchIncludeDirectories, searchFileExtensions);
@@ -5550,11 +5601,12 @@ async function showQuickOpenWindow(
             for (const symbol of indexedSymbols) {
               const isPinned = pinExManager.isPinned(symbol.uri);
               classResults.push({
-                label: `$(symbol-class) ${symbol.name}`,
-                description: `in ${symbol.fileName}${isPinned ? ' pinned' : ''}`,
+                label: `$(${symbolIconForKind(symbol.kind)}) ${symbol.name}`,
+                description: `${symbol.kind} in ${symbol.fileName}${isPinned ? ' pinned' : ''}`,
                 uri: symbol.uri,
                 isClass: true,
                 line: symbol.line,
+                symbolKind: symbol.kind,
                 buttons: [
                   {
                     iconPath: new vscode.ThemeIcon(isPinned ? 'pinned' : 'pin'),
@@ -5905,7 +5957,7 @@ async function showQuickOpenWindow(
       const openFileUris = new Set<string>();
       openFiles.forEach(f => openFileUris.add(f.uri.toString()));
       
-      const newItems: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean }> = [];
+      const newItems: Array<vscode.QuickPickItem & { uri?: vscode.Uri; isClass?: boolean; symbolKind?: string }> = [];
       
       openFiles.forEach(file => {
         const isPinnedFile = pinExManager.isPinned(file.uri);
@@ -12411,12 +12463,12 @@ function getSettingsWebviewContent(): string {
       </div>
       <div class="form-group">
         <label>🔍 Search Mode</label>
-        <div class="hint">Choose what to search: file names, file content, or both</div>
+        <div class="hint">Choose what to search: file names, symbols, file content, or both</div>
         <select id="search-mode" style="width:200px;padding:6px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;">
-          <option value="all">All (File + Class + Content)</option>
+          <option value="all">All (File + Symbol + Content)</option>
           <option value="filename">File Only</option>
-          <option value="class">Class Only</option>
-          <option value="fileclass">File + Class</option>
+          <option value="class">Symbol Only</option>
+          <option value="fileclass">File + Symbol</option>
           <option value="content">Content Only</option>
         </select>
       </div>

@@ -17,7 +17,7 @@ export interface IndexedFileEntry {
 export interface IndexedSymbolEntry {
   uri: vscode.Uri;
   name: string;
-  kind: 'class' | 'struct' | 'interface' | 'enum';
+  kind: 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'method' | 'constructor';
   line: number;
   container?: string;
   fileName: string;
@@ -60,7 +60,7 @@ interface PersistedIndexFileEntry {
 interface PersistedIndexSymbolEntry {
   uri: string;
   name: string;
-  kind: 'class' | 'struct' | 'interface' | 'enum';
+  kind: 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'method' | 'constructor';
   line: number;
   container?: string;
   fileName: string;
@@ -80,7 +80,7 @@ interface PersistedSearchIndex {
   symbols: PersistedIndexSymbolEntry[];
 }
 
-const INDEX_CACHE_VERSION = 1;
+const INDEX_CACHE_VERSION = 2;
 const DEFAULT_INDEX_EXCLUDES = [
   '**/node_modules/**',
   '**/bin/**',
@@ -173,6 +173,11 @@ function relativePathFor(uri: vscode.Uri, workspaceFolder?: vscode.WorkspaceFold
 function toStorageSafeName(value: string): string {
   return value.replace(/[^a-z0-9._-]+/gi, '_');
 }
+
+const FUNCTION_NAME_BLACKLIST = new Set([
+  'if', 'for', 'foreach', 'while', 'switch', 'catch', 'using', 'lock', 'return',
+  'sizeof', 'typeof', 'nameof', 'new', 'else', 'do', 'try'
+]);
 
 export class WorkspaceSearchIndex implements vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<void>();
@@ -597,28 +602,47 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
     const relativePath = relativePathFor(uri, workspaceFolder);
     const fileName = path.basename(uri.fsPath) || key;
+    const extension = this.getExtension(uri);
     const lines = text.split(/\r?\n/);
     const typeRegex = /\b(class|struct|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/g;
 
     const symbols: IndexedSymbolEntry[] = [];
+    const seen = new Set<string>();
+    const pushSymbol = (name: string, kind: IndexedSymbolEntry['kind'], line: number) => {
+      if (!name || FUNCTION_NAME_BLACKLIST.has(name.toLowerCase())) {
+        return;
+      }
+      const uniqueKey = `${kind}:${name}:${line}`;
+      if (seen.has(uniqueKey)) {
+        return;
+      }
+      seen.add(uniqueKey);
+      symbols.push({
+        uri,
+        name,
+        kind,
+        line,
+        fileName,
+        relativePath,
+        normalizedName: normalizeForSearch(name),
+        acronym: camelAcronym(name),
+        tokens: splitTokens(name),
+        mtime
+      });
+    };
+
     for (let i = 0; i < lines.length; i++) {
       typeRegex.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = typeRegex.exec(lines[i])) !== null) {
         const kind = match[1] as IndexedSymbolEntry['kind'];
         const name = match[2];
-        symbols.push({
-          uri,
-          name,
-          kind,
-          line: i + 1,
-          fileName,
-          relativePath,
-          normalizedName: normalizeForSearch(name),
-          acronym: camelAcronym(name),
-          tokens: splitTokens(name),
-          mtime
-        });
+        pushSymbol(name, kind, i + 1);
+      }
+
+      const functionSymbols = this.extractFunctionSymbolsFromLine(lines[i], extension);
+      for (const symbol of functionSymbols) {
+        pushSymbol(symbol.name, symbol.kind, i + 1);
       }
     }
 
@@ -627,6 +651,61 @@ export class WorkspaceSearchIndex implements vscode.Disposable {
     for (const symbol of symbols) {
       this.addSymbolToLookups(key, symbol);
     }
+  }
+
+  private extractFunctionSymbolsFromLine(line: string, extension: string): Array<{ name: string; kind: IndexedSymbolEntry['kind'] }> {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('#')) {
+      return [];
+    }
+
+    const results: Array<{ name: string; kind: IndexedSymbolEntry['kind'] }> = [];
+    const push = (name: string | undefined, kind: IndexedSymbolEntry['kind']) => {
+      if (name && !FUNCTION_NAME_BLACKLIST.has(name.toLowerCase())) {
+        results.push({ name, kind });
+      }
+    };
+
+    if (extension === 'py') {
+      const match = trimmed.match(/^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+      push(match?.[1], 'function');
+      return results;
+    }
+
+    if (extension === 'go') {
+      const match = trimmed.match(/^func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+      push(match?.[1], 'function');
+      return results;
+    }
+
+    if (extension === 'rb') {
+      const match = trimmed.match(/^def\s+(?:self\.)?([A-Za-z_][A-Za-z0-9_!?=]*)/);
+      push(match?.[1], 'function');
+      return results;
+    }
+
+    if (extension === 'php') {
+      const match = trimmed.match(/^(?:public|private|protected|static|abstract|final|\s)*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+      push(match?.[1], 'function');
+      return results;
+    }
+
+    if (['ts', 'tsx', 'js', 'jsx'].includes(extension)) {
+      const functionMatch = trimmed.match(/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/);
+      push(functionMatch?.[1], 'function');
+
+      const assignmentMatch = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/);
+      push(assignmentMatch?.[1], 'function');
+
+      const methodMatch = trimmed.match(/^(?:public\s+|private\s+|protected\s+|static\s+|async\s+|override\s+|readonly\s+|get\s+|set\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*(?::\s*[^={]+)?\s*(?:\{|=>)/);
+      push(methodMatch?.[1], methodMatch?.[1] === 'constructor' ? 'constructor' : 'method');
+      return results;
+    }
+
+    const cFamilyMatch = trimmed.match(/^(?:(?:public|private|protected|internal|static|virtual|override|async|extern|sealed|abstract|partial|readonly|unsafe|final|synchronized|inline|constexpr|friend|native|open|operator)\s+)*(?:[A-Za-z_][A-Za-z0-9_:<>,\[\].?*&]*\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*(?:[:\w\s,<>()[\].]*\{|=>|;)/);
+    push(cFamilyMatch?.[1], 'method');
+
+    return results;
   }
 
   private clearSymbolsForUri(key: string): void {

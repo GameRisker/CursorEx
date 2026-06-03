@@ -607,7 +607,7 @@
               "all"
             ],
             "default": "all",
-            "description": "Search mode: 'filename' (file name only), 'class' (types only), 'fileclass' (file names + types), 'content' (file content), 'all' (file names + types + content)."
+            "description": "Search mode: 'filename' (file name only), 'class' (symbols only: types + functions), 'fileclass' (file names + symbols), 'content' (file content), 'all' (file names + symbols + content)."
           },
           "cursorToolWindow.search.fileExtensions": {
             "type": "array",
