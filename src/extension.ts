@@ -1075,6 +1075,7 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       this.postReferenceSessions();
       this.postReferenceSearching(this.isReferenceSearching);
       this.postP4Snapshot();
+      this.postSvnSnapshot();
       if (this.pendingPinExTab) {
         this.postSwitchPinExTab(this.pendingPinExTab);
         this.pendingPinExTab = null;
@@ -1831,6 +1832,11 @@ class CursorToolSidebarProvider implements vscode.WebviewViewProvider {
       const infoText = await this.runP4(['-ztag', 'info'], cwd);
       const clientName = (infoText.match(/^\.\.\. clientName (.+)$/m)?.[1] || '').trim();
       const clientRoot = (infoText.match(/^\.\.\. clientRoot (.+)$/m)?.[1] || '').trim();
+      if (!clientRoot || !this.isPathInside(clientRoot, cwd)) {
+        throw new Error(clientRoot
+          ? `Current workspace is outside P4 client root: ${clientRoot}`
+          : 'P4 client root not found.');
+      }
 
       const openedText = await this.runP4(['-ztag', 'opened'], cwd).catch(() => '');
       const openedBlocks = openedText
