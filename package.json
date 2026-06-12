@@ -2,7 +2,7 @@
   "name": "cursor-tool-window",
   "displayName": "Cursor Tool Window",
   "description": "An extensible tool window for Cursor/VS Code, including TODOs and comments.",
-  "version": "0.1.126",
+  "version": "0.1.169",
   "publisher": "danyang",
   "repository": {
     "type": "git",
@@ -26,10 +26,32 @@
     "onCommand:cursorToolWindow.p4Sync",
     "onCommand:cursorToolWindow.p4SubmitDirectory",
     "onCommand:cursorToolWindow.svnUpdate",
+    "onCommand:cursorToolWindow.svnUpdateToRevision",
+    "onCommand:cursorToolWindow.svnCheckRemote",
     "onCommand:cursorToolWindow.svnAdd",
+    "onCommand:cursorToolWindow.svnIgnore",
     "onCommand:cursorToolWindow.svnRevert",
     "onCommand:cursorToolWindow.svnDiffBase",
+    "onCommand:cursorToolWindow.svnCreatePatch",
+    "onCommand:cursorToolWindow.svnApplyPatch",
     "onCommand:cursorToolWindow.svnFileHistory",
+    "onCommand:cursorToolWindow.svnRepositoryLog",
+    "onCommand:cursorToolWindow.svnRepositoryBrowser",
+    "onCommand:cursorToolWindow.svnCheckout",
+    "onCommand:cursorToolWindow.svnExport",
+    "onCommand:cursorToolWindow.svnBlame",
+    "onCommand:cursorToolWindow.svnRevisionGraph",
+    "onCommand:cursorToolWindow.svnProperties",
+    "onCommand:cursorToolWindow.svnInfo",
+    "onCommand:cursorToolWindow.svnChangelist",
+    "onCommand:cursorToolWindow.svnCreateBranch",
+    "onCommand:cursorToolWindow.svnSwitch",
+    "onCommand:cursorToolWindow.svnRelocate",
+    "onCommand:cursorToolWindow.svnMerge",
+    "onCommand:cursorToolWindow.svnCleanup",
+    "onCommand:cursorToolWindow.svnResolve",
+    "onCommand:cursorToolWindow.svnLock",
+    "onCommand:cursorToolWindow.svnUnlock",
     "onCommand:cursorToolWindow.svnCommitWorkbench",
     "onCommand:cursorToolWindow.svnCommitDirectory",
     "onView:cursorToolWindow.sidebar"
@@ -138,8 +160,23 @@
         "category": "Cursor Tools"
       },
       {
+        "command": "cursorToolWindow.svnUpdateToRevision",
+        "title": "SVN Update to Revision...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnCheckRemote",
+        "title": "SVN Check Repository",
+        "category": "Cursor Tools"
+      },
+      {
         "command": "cursorToolWindow.svnAdd",
         "title": "SVN Add",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnIgnore",
+        "title": "SVN Add to Ignore List",
         "category": "Cursor Tools"
       },
       {
@@ -153,8 +190,103 @@
         "category": "Cursor Tools"
       },
       {
+        "command": "cursorToolWindow.svnCreatePatch",
+        "title": "SVN Create Patch...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnApplyPatch",
+        "title": "SVN Apply Patch...",
+        "category": "Cursor Tools"
+      },
+      {
         "command": "cursorToolWindow.svnFileHistory",
         "title": "SVN File History",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnRepositoryLog",
+        "title": "SVN Log",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnRepositoryBrowser",
+        "title": "SVN Repo Browser",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnCheckout",
+        "title": "SVN Checkout...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnExport",
+        "title": "SVN Export...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnBlame",
+        "title": "SVN Blame",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnRevisionGraph",
+        "title": "SVN Revision Graph",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnProperties",
+        "title": "SVN Properties...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnInfo",
+        "title": "SVN Info...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnChangelist",
+        "title": "SVN Changelist...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnCreateBranch",
+        "title": "SVN Branch/Tag...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnSwitch",
+        "title": "SVN Switch...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnRelocate",
+        "title": "SVN Relocate...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnMerge",
+        "title": "SVN Merge...",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnCleanup",
+        "title": "SVN Cleanup",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnResolve",
+        "title": "SVN Resolve",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnLock",
+        "title": "SVN Lock",
+        "category": "Cursor Tools"
+      },
+      {
+        "command": "cursorToolWindow.svnUnlock",
+        "title": "SVN Unlock",
         "category": "Cursor Tools"
       },
       {
@@ -267,14 +399,39 @@
           "group": "4_svn@3"
         },
         {
-          "command": "cursorToolWindow.svnRevert",
+          "command": "cursorToolWindow.svnProperties",
           "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@4"
         },
         {
-          "command": "cursorToolWindow.svnCommitWorkbench",
+          "command": "cursorToolWindow.svnInfo",
           "when": "cursorToolWindow.vcs.showSvn",
           "group": "4_svn@5"
+        },
+        {
+          "command": "cursorToolWindow.svnRevisionGraph",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@6"
+        },
+        {
+          "command": "cursorToolWindow.svnExport",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@7"
+        },
+        {
+          "command": "cursorToolWindow.svnChangelist",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@8"
+        },
+        {
+          "command": "cursorToolWindow.svnRevert",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@9"
+        },
+        {
+          "command": "cursorToolWindow.svnCommitWorkbench",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@10"
         }
       ],
       "explorer/context": [
@@ -358,14 +515,39 @@
           "group": "4_svn@3"
         },
         {
+          "command": "cursorToolWindow.svnProperties",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@4"
+        },
+        {
+          "command": "cursorToolWindow.svnInfo",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@5"
+        },
+        {
+          "command": "cursorToolWindow.svnRevisionGraph",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@6"
+        },
+        {
+          "command": "cursorToolWindow.svnExport",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@7"
+        },
+        {
+          "command": "cursorToolWindow.svnChangelist",
+          "when": "cursorToolWindow.vcs.showSvn",
+          "group": "4_svn@8"
+        },
+        {
           "command": "cursorToolWindow.svnRevert",
           "when": "explorerResourceIsFolder == false && cursorToolWindow.vcs.showSvn",
-          "group": "4_svn@4"
+          "group": "4_svn@9"
         },
         {
           "command": "cursorToolWindow.svnCommitWorkbench",
           "when": "cursorToolWindow.vcs.showSvn",
-          "group": "4_svn@5"
+          "group": "4_svn@10"
         }
       ],
       "view/title": [
