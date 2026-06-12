@@ -7809,15 +7809,9 @@ function getWebviewContent(version: string): string {
           <div class="pinex-tab-content" id="pinex-svn-content">
             <div class="pinex-inline-toolbar">
               <button class="pinex-toolbar-icon" id="svn-refresh-btn-inline" title="Refresh SVN">&#8635;</button>
-              <button class="pinex-toolbar-icon" id="svn-update-btn-inline" title="Update working copy">Update</button>
-              <button class="pinex-toolbar-icon" id="svn-commit-dir-btn-inline" title="Open SVN Commit window">Commit...</button>
-              <button class="pinex-toolbar-icon" id="svn-add-current-btn-inline" title="Add current file">Add</button>
-              <button class="pinex-toolbar-icon" id="svn-diff-current-btn-inline" title="Diff current file">Diff</button>
-              <button class="pinex-toolbar-icon" id="svn-history-current-btn-inline" title="Show current file history">History</button>
-              <button class="pinex-toolbar-icon" id="svn-revert-current-btn-inline" title="Revert current file">Revert</button>
               <button class="pinex-toolbar-icon" id="svn-expand-tree-btn-inline" title="Expand SVN tree">+</button>
               <button class="pinex-toolbar-icon" id="svn-collapse-tree-btn-inline" title="Collapse SVN tree">-</button>
-              <button class="pinex-toolbar-icon" id="svn-toggle-unversioned-btn-inline" title="Hide unversioned files">?</button>
+              <button class="pinex-toolbar-icon" id="svn-toggle-unversioned-btn-inline" title="Hide unversioned files">Unversioned: On</button>
             </div>
             <div class="p4-panel scroll-area" id="svn-panel"></div>
           </div>
@@ -8295,7 +8289,7 @@ function getWebviewContent(version: string): string {
       function syncSvnUnversionedToggle() {
         if (!svnToggleUnversionedBtn) return;
         svnToggleUnversionedBtn.classList.toggle('active', showSvnUnversioned);
-        svnToggleUnversionedBtn.textContent = showSvnUnversioned ? '?' : '-?';
+        svnToggleUnversionedBtn.textContent = showSvnUnversioned ? 'Unversioned: On' : 'Unversioned: Off';
         svnToggleUnversionedBtn.title = showSvnUnversioned ? 'Hide unversioned files' : 'Show unversioned files';
       }
 
@@ -9864,11 +9858,6 @@ function getWebviewContent(version: string): string {
           row.title = item.path || item.fsPath || '';
 
           var actionInfo = getSvnActionInfo(item);
-          var badge = document.createElement('span');
-          badge.className = 'p4-action-badge ' + actionInfo.key;
-          badge.textContent = actionInfo.label;
-          badge.title = actionInfo.text;
-
           var nameSpan = document.createElement('span');
           nameSpan.className = 'p4-file-name';
           nameSpan.textContent = (labelText || item.path || item.fsPath || '') + ' ';
@@ -9877,7 +9866,6 @@ function getWebviewContent(version: string): string {
           metaSpan.className = 'p4-file-meta';
           metaSpan.textContent = actionInfo.text;
 
-          row.appendChild(badge);
           row.appendChild(nameSpan);
           row.appendChild(metaSpan);
 
@@ -9915,15 +9903,6 @@ function getWebviewContent(version: string): string {
           chevron.className = 'vcs-tree-chevron';
           chevron.textContent = expanded ? '-' : '+';
           row.appendChild(chevron);
-
-          if (node.item) {
-            var actionInfo = getSvnActionInfo(node.item);
-            var badge = document.createElement('span');
-            badge.className = 'p4-action-badge ' + actionInfo.key;
-            badge.textContent = actionInfo.label;
-            badge.title = actionInfo.text;
-            row.appendChild(badge);
-          }
 
           var label = document.createElement('span');
           label.className = 'vcs-tree-folder';
