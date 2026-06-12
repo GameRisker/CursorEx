@@ -13,6 +13,7 @@ import { WorkspaceSearchIndex } from './workspaceSearchIndex';
 const EXTENSION_VERSION: string = require('../package.json').version;
 const execFileAsync = promisify(execFile);
 const UPDATE_API_URL = 'https://api.github.com/repos/GameRisker/CursorEx/releases/latest';
+const UPDATE_LATEST_RELEASE_URL = 'https://github.com/GameRisker/CursorEx/releases/latest';
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_STARTUP_DELAY_MS = 5000;
 const LAST_STARTUP_UPDATE_CHECK_KEY = 'cursorToolWindow.update.lastStartupCheckAt';
@@ -200,6 +201,15 @@ interface UpdateInfo {
   isUpdateAvailable: boolean;
 }
 
+interface LatestReleaseInfo {
+  tagName: string;
+  latestVersion: string;
+  releaseUrl: string;
+  releaseNotes: string;
+  assetName: string;
+  downloadUrl: string;
+}
+
 const DEFAULT_SEARCH_PROFILE: SearchProfile = {
   type: 'General',
   searchFileExtensions: [],
@@ -281,6 +291,37 @@ function httpsGetBuffer(url: string, headers: Record<string, string>, redirectCo
       });
       response.on('end', () => resolve(Buffer.concat(chunks)));
       response.on('error', reject);
+    });
+
+    request.setTimeout(30000, () => {
+      request.destroy(new Error('GitHub request timed out.'));
+    });
+    request.on('error', reject);
+  });
+}
+
+function httpsResolveFinalUrl(url: string, headers: Record<string, string>, redirectCount = 0): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, response => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+      response.resume();
+
+      if (location && [301, 302, 303, 307, 308].includes(statusCode)) {
+        if (redirectCount >= 5) {
+          reject(new Error('Too many redirects while resolving latest release.'));
+          return;
+        }
+        resolve(httpsResolveFinalUrl(new URL(location, url).toString(), headers, redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        reject(new Error(`GitHub request failed with HTTP ${statusCode}.`));
+        return;
+      }
+
+      resolve(url);
     });
 
     request.setTimeout(30000, () => {
@@ -478,6 +519,52 @@ class GithubReleaseUpdateService {
     }
   }
 
+  private async fetchLatestReleaseInfo(): Promise<LatestReleaseInfo> {
+    try {
+      const release = await httpsGetJson<GithubRelease>(UPDATE_API_URL);
+      const tagName = typeof release.tag_name === 'string' ? release.tag_name : '';
+      const latestVersion = tagName.replace(/^v/i, '');
+      const releaseUrl = typeof release.html_url === 'string' ? release.html_url : UPDATE_LATEST_RELEASE_URL;
+      const releaseNotes = typeof release.body === 'string' ? release.body.trim() : '';
+      const asset = (Array.isArray(release.assets) ? release.assets : []).find(item => {
+        return typeof item.name === 'string' &&
+          item.name.toLowerCase().endsWith('.vsix') &&
+          typeof item.browser_download_url === 'string';
+      });
+
+      return {
+        tagName,
+        latestVersion,
+        releaseUrl,
+        releaseNotes,
+        assetName: asset?.name || '',
+        downloadUrl: asset?.browser_download_url || ''
+      };
+    } catch (error) {
+      const apiError = getErrorMessage(error);
+      const releaseUrl = await httpsResolveFinalUrl(UPDATE_LATEST_RELEASE_URL, {
+        'Accept': 'text/html',
+        'User-Agent': 'CursorEx-Updater'
+      });
+      const match = releaseUrl.match(/\/releases\/tag\/([^/?#]+)/);
+      const tagName = match ? decodeURIComponent(match[1]) : '';
+      const latestVersion = tagName.replace(/^v/i, '');
+      const assetName = latestVersion ? `cursor-tool-window-${latestVersion}.vsix` : '';
+      const downloadUrl = tagName && assetName
+        ? `https://github.com/GameRisker/CursorEx/releases/download/${encodeURIComponent(tagName)}/${encodeURIComponent(assetName)}`
+        : '';
+
+      return {
+        tagName,
+        latestVersion,
+        releaseUrl,
+        releaseNotes: `GitHub API was unavailable (${apiError}); release notes could not be loaded.`,
+        assetName,
+        downloadUrl
+      };
+    }
+  }
+
   private async checkForUpdates(manual: boolean): Promise<UpdateInfo> {
     this.setStatus({
       state: 'checking',
@@ -490,16 +577,11 @@ class GithubReleaseUpdateService {
     });
 
     try {
-      const release = await httpsGetJson<GithubRelease>(UPDATE_API_URL);
-      const tagName = typeof release.tag_name === 'string' ? release.tag_name : '';
-      const latestVersion = tagName.replace(/^v/i, '');
-      const releaseUrl = typeof release.html_url === 'string' ? release.html_url : 'https://github.com/GameRisker/CursorEx/releases/latest';
-      const releaseNotes = typeof release.body === 'string' ? release.body.trim() : '';
-      const asset = (Array.isArray(release.assets) ? release.assets : []).find(item => {
-        return typeof item.name === 'string' &&
-          item.name.toLowerCase().endsWith('.vsix') &&
-          typeof item.browser_download_url === 'string';
-      });
+      const release = await this.fetchLatestReleaseInfo();
+      const tagName = release.tagName;
+      const latestVersion = release.latestVersion;
+      const releaseUrl = release.releaseUrl || UPDATE_LATEST_RELEASE_URL;
+      const releaseNotes = release.releaseNotes;
 
       const comparison = compareSemver(latestVersion, EXTENSION_VERSION);
       if (comparison === null) {
@@ -532,7 +614,7 @@ class GithubReleaseUpdateService {
         return info;
       }
 
-      if (!asset || !asset.name || !asset.browser_download_url) {
+      if (!release.assetName || !release.downloadUrl) {
         throw new Error(`Release ${tagName} does not include a VSIX asset.`);
       }
 
@@ -541,8 +623,8 @@ class GithubReleaseUpdateService {
         latestVersion: latestVersion,
         tagName: tagName,
         releaseUrl: releaseUrl,
-        assetName: asset.name,
-        downloadUrl: asset.browser_download_url,
+        assetName: release.assetName,
+        downloadUrl: release.downloadUrl,
         releaseNotes: releaseNotes,
         isUpdateAvailable: true
       };
@@ -570,7 +652,7 @@ class GithubReleaseUpdateService {
       if (manual) {
         throw error;
       }
-      return this.createNoUpdateInfo('unknown', 'https://github.com/GameRisker/CursorEx/releases/latest');
+      return this.createNoUpdateInfo('unknown', UPDATE_LATEST_RELEASE_URL);
     }
   }
 
